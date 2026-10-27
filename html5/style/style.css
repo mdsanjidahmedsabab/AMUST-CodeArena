@@ -1,0 +1,13 @@
+nav li{
+    list-style: none;
+    display: inline;
+    margin-right: 10px;
+}
+nav li:hover{
+    background-color: rgb(5, 253, 253);
+    border-radius:5px;
+}
+nav li a{
+text-decoration: none;
+}
+footer{text-align: center;}

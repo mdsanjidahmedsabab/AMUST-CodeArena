@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ──
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum Difficulty {
+  Easy
+  Medium
+  Hard
+}
+
+enum ProblemSource {
+  local
+  cf
+  cc
+  leetcode
+  hackerrank
+}
+
+enum Language {
+  C
+  CPP
+  JAVA
+  JAVASCRIPT
+  PYTHON
+}
+
+enum Verdict {
+  PENDING
+  ACCEPTED
+  WRONG_ANSWER
+  TIME_LIMIT
+  MEMORY_LIMIT
+  RUNTIME_ERROR
+  COMPILATION_ERROR
+}
+
+enum ContestStatus {
+  DRAFT
+  RUNNING
+  FINISHED
+}
+
+enum SessionMode {
+  CONTEST
+  PRACTICE
+  TRAINING
+}
+
+// ── Models ──
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  universityId  String?      @unique @map("university_id")
+  name          String
+  passwordHash  String       @map("password_hash")
+  role          Role         @default(STUDENT)
+  rating        Int          @default(1200)
+  tier          String       @default("Newbie")
+  sessionMode   SessionMode  @default(PRACTICE)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  submissions       Submission[]
+  ratingHistory     UserRatingHistory[]
+  contestParticipants ContestParticipant[]
+
+  @@map("users")
+}
+
+model Problem {
+  id          String        @id @default(cuid())
+  title       String
+  statement   String?       @db.Text
+  source      ProblemSource @default(local)
+  sourceId    String?       @map("source_id")
+  difficulty  Difficulty
+  rating      Int           @default(800)
+  tags        String[]      @default([])
+  sampleInput String?       @map("sample_input") @db.Text
+  sampleOutput String?      @map("sample_output") @db.Text
+  cachedAt    DateTime?     @map("cached_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  submissions      Submission[]
+  contestProblems  ContestProblem[]
+
+  @@unique([source, sourceId])
+  @@map("problems")
+}
+
+model Contest {
+  id          String        @id @default(cuid())
+  title       String
+  description String?       @db.Text
+  status      ContestStatus @default(DRAFT)
+  startTime   DateTime      @map("start_time")
+  endTime     DateTime      @map("end_time")
+  createdBy   String        @map("created_by")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  problems     ContestProblem[]
+  participants ContestParticipant[]
+  submissions  Submission[]
+
+  @@map("contests")
+}
+
+model ContestProblem {
+  id        String  @id @default(cuid())
+  contestId String  @map("contest_id")
+  problemId String  @map("problem_id")
+  label     String  // e.g., "A", "B", "C"
+  order     Int     @default(0)
+
+  contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, problemId])
+  @@unique([contestId, label])
+  @@map("contest_problems")
+}
+
+model ContestParticipant {
+  id        String @id @default(cuid())
+  contestId String @map("contest_id")
+  userId    String @map("user_id")
+  penalty   Int    @default(0)
+  solved    Int    @default(0)
+
+  contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, userId])
+  @@map("contest_participants")
+}
+
+model Submission {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  problemId  String    @map("problem_id")
+  contestId  String?   @map("contest_id")
+  language   Language
+  sourceCode String    @map("source_code") @db.Text
+  verdict    Verdict   @default(PENDING)
+  timeMs     Int?      @map("time_ms")
+  memoryKb   Int?      @map("memory_kb")
+  reportHash String?   @map("report_hash")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem    Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  contest    Contest?  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@map("submissions")
+}
+
+model UserRatingHistory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  contestId String   @map("contest_id")
+  oldRating Int      @map("old_rating")
+  newRating Int      @map("new_rating")
+  delta     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_rating_history")
+}

@@ -1,0 +1,36 @@
+h3{
+    font-size: 30px;
+    text-decoration: underline;
+}
+.second{
+    /* display: none; */
+    /* visibility: hidden; */
+}
+.blog{ 
+    margin: 30px;
+    padding: 20%;
+    border: 10px  solid indianred;
+    box-shadow: 11px 11px 11px rgb(102, 100, 104);
+   font-family: 'Courier New', Courier, monospace;
+} 
+#i{
+    border: 1px solid black;
+    display: block;
+    height: 20px;
+
+}
+.header{color: whitesmoke;
+    height: 300px;
+   /* background-image: url('images/Adobe\ Firefly.jpg'); */
+   background-image: url('../images/kill.png');
+   /* background-image: url('../Winter.jpg'); */
+   /* background-repeat: no-repeat; */
+   /* background-repeat: repeat-x; */
+   /* background-repeat: repeat-y; */
+   /* background-size: cover; */
+   /* background-size: contain; */
+
+    
+   
+}
+

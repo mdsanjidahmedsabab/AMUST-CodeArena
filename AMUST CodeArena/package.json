@@ -1,0 +1,21 @@
+{
+  "name": "amust-codearena",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AMUST CodeArena — Hybrid Virtual Online Judge & Academic LMS",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev:server & npm run dev:client",
+    "dev:client": "npm -w client run dev",
+    "dev:server": "npm -w server run dev",
+    "build": "npm -w client run build",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "db:generate": "npm -w server run db:generate",
+    "db:migrate": "npm -w server run db:migrate",
+    "db:push": "npm -w server run db:push"
+  }
+}

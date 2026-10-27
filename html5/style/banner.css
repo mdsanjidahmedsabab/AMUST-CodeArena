@@ -1,0 +1,35 @@
+body{
+    max-width: 1270px;
+    background-color: rgba(247, 239, 230, 0.651);
+    margin: 0 auto;
+
+}
+.hero-container{
+     display: flex;
+     background-color: lightcyan;
+     padding: 20px;
+     font-size:2em;
+     justify-content: center;
+     align-items: center;
+     gap: 40px;
+     border-radius: 20px;
+}
+.hero-container img{
+    width: 250px;
+    height:300px;
+     border-radius: 20px;
+
+}
+.hero-container button{
+    background-color: rgb(94, 80, 80);
+    color: white;
+    font-size: 0.9em;
+    border-radius: 5px;
+    cursor:pointer;
+    
+}
+.hero-container button:hover{
+    background-color: rgb(7, 238, 238);
+    color: black;
+    border-radius: 7px;
+}
