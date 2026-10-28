@@ -1,7 +1,116 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="12" fill="#1e293b"/>
-  <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
-        font-family="monospace" font-size="32" font-weight="bold" fill="#3b82f6">
-    CA
-  </text>
+  <defs>
+    <!-- Dark Slate Squircle Background (#090d16) -->
+    <linearGradient id="amustBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#0b1220" />
+    </linearGradient>
+
+    <!-- Botanical Emerald Perimeter Glow -->
+    <linearGradient id="amustBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#047857" stop-opacity="0.25" />
+    </linearGradient>
+
+    <!-- Primary Emerald Ribbon Gradient (#10b981 to #047857) -->
+    <linearGradient id="amustEmerald" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="45%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+
+    <!-- Deep Botanical Green for underpasses & ribbon folds -->
+    <linearGradient id="amustBotanicalDeep" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#065f46" />
+      <stop offset="100%" stop-color="#022c22" />
+    </linearGradient>
+
+    <!-- Crisp Silver-White / Bright Mint Highlight (#f8fafc to #a7f3d0) -->
+    <linearGradient id="amustSilverMint" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="50%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#a7f3d0" />
+    </linearGradient>
+
+    <!-- 3D Ribbon Over-Under Depth Shadow -->
+    <filter id="amustRibbonShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.8" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.85" />
+    </filter>
+  </defs>
+
+  <!-- Dark Slate Background Squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#amustBg)" stroke="url(#amustBorder)" stroke-width="1.2" />
+
+  <!-- 1. C Ribbon Upper Backpass (Under A's right leg) -->
+  <path
+    d="M44 18C39 14.5 32 15 27 19.5"
+    stroke="url(#amustBotanicalDeep)"
+    stroke-width="5.5"
+    stroke-linecap="round"
+  />
+
+  <!-- 2. The Letter A Main Ribbon (Left leg, apex, right leg) -->
+  <path
+    d="M16 48L28.5 13.5C29.2 11.5 32 11.5 32.8 13.5L44 48"
+    stroke="url(#amustEmerald)"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- 3. The Letter A Crossbar -->
+  <path
+    d="M21 35.5H38"
+    stroke="url(#amustEmerald)"
+    stroke-width="4.5"
+    stroke-linecap="round"
+  />
+
+  <!-- 4. C Ribbon Forepass (Sweeps in front of A's right leg) -->
+  <path
+    d="M44 18C49.5 22.5 51 28.5 51 33.5C51 40.5 46.5 48 39 49C31.5 50 24.5 46 22.5 40.5"
+    stroke="url(#amustEmerald)"
+    stroke-width="5.2"
+    stroke-linecap="round"
+    filter="url(#amustRibbonShadow)"
+  />
+
+  <!-- 5. Crisp Silver-White / Bright Mint Highlights along Upper Inner Curves & Bevels -->
+  <!-- A Apex outer rim -->
+  <path
+    d="M28.5 13.5C29.2 11.5 32 11.5 32.8 13.5L35.5 20"
+    stroke="#ffffff"
+    stroke-width="2"
+    stroke-linecap="round"
+  />
+  <!-- A Apex inner curve bevel -->
+  <path
+    d="M25 23.5L30.5 14.5L34.5 23.5"
+    stroke="url(#amustSilverMint)"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <!-- C Upper inner curve highlight -->
+  <path
+    d="M32 19C36 16.5 41 16.5 45 19.5"
+    stroke="url(#amustSilverMint)"
+    stroke-width="1.8"
+    stroke-linecap="round"
+  />
+  <!-- C Shoulder crest highlight -->
+  <path
+    d="M43 17C47.5 20.5 49.5 25.5 49.5 30"
+    stroke="url(#amustSilverMint)"
+    stroke-width="1.6"
+    stroke-linecap="round"
+  />
+  <!-- C Lower inner curve highlight -->
+  <path
+    d="M36 45.5C41.5 45.5 45.5 41 45.5 34"
+    stroke="url(#amustSilverMint)"
+    stroke-width="1.3"
+    stroke-linecap="round"
+    stroke-opacity="0.85"
+  />
 </svg>

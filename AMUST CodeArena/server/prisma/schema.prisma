@@ -49,7 +49,9 @@ enum Verdict {
 
 enum ContestStatus {
   DRAFT
+  UPCOMING
   RUNNING
+  ENDED
   FINISHED
 }
 
@@ -59,57 +61,91 @@ enum SessionMode {
   TRAINING
 }
 
+enum TopicTag {
+  DP
+  GRAPHS
+  GREEDY
+  MATH
+  STRINGS
+  IMPLEMENTATION
+  BINARY_SEARCH
+  SORTING
+  TWO_POINTERS
+  TREE
+  GEOMETRY
+  BITMASK
+}
+
 // ── Models ──
 
 model User {
-  id            String       @id @default(cuid())
-  email         String       @unique
-  universityId  String?      @unique @map("university_id")
-  name          String
-  passwordHash  String       @map("password_hash")
-  role          Role         @default(STUDENT)
-  rating        Int          @default(1200)
-  tier          String       @default("Newbie")
-  sessionMode   SessionMode  @default(PRACTICE)
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  id                String      @id @default(cuid())
+  email             String      @unique
+  universityId      String?     @unique @map("university_id")
+  name              String
+  passwordHash      String      @map("password_hash")
+  role              Role        @default(STUDENT)
+  rating            Int         @default(1200)
+  tier              String      @default("Newbie")
+  sessionMode       SessionMode @default(PRACTICE)
+  refreshTokenHash  String?     @map("refresh_token_hash")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
 
-  submissions       Submission[]
-  ratingHistory     UserRatingHistory[]
+  submissions         Submission[]
+  ratingHistory       UserRatingHistory[]
   contestParticipants ContestParticipant[]
 
   @@map("users")
 }
 
 model Problem {
-  id          String        @id @default(cuid())
-  title       String
-  statement   String?       @db.Text
-  source      ProblemSource @default(local)
-  sourceId    String?       @map("source_id")
-  difficulty  Difficulty
-  rating      Int           @default(800)
-  tags        String[]      @default([])
-  sampleInput String?       @map("sample_input") @db.Text
-  sampleOutput String?      @map("sample_output") @db.Text
-  cachedAt    DateTime?     @map("cached_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  id               String        @id @default(cuid())
+  title            String
+  source           ProblemSource @default(local)
+  sourceId         String?       @map("remote_problem_id")
+  directUrl        String?       @map("direct_url")
+  difficulty       Difficulty
+  rating           Int           @default(800)
+  statementCache   String?       @map("statement_cache") @db.Text
+  sampleTestcases  Json?         @map("sample_testcases")
+  cachedAt         DateTime?     @map("cached_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
 
+  tags             ProblemTag[]
   submissions      Submission[]
   contestProblems  ContestProblem[]
 
   @@unique([source, sourceId])
+  @@index([difficulty, rating])
+  @@index([cachedAt])
   @@map("problems")
+}
+
+model ProblemTag {
+  id        String   @id @default(cuid())
+  problemId String   @map("problem_id")
+  tag       TopicTag
+
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, tag])
+  @@index([tag])
+  @@map("problem_tags")
 }
 
 model Contest {
   id          String        @id @default(cuid())
   title       String
+  slug        String        @unique
   description String?       @db.Text
-  status      ContestStatus @default(DRAFT)
+  status      ContestStatus @default(UPCOMING)
   startTime   DateTime      @map("start_time")
   endTime     DateTime      @map("end_time")
+  freezeTime  DateTime?     @map("freeze_time")
+  isPrivate   Boolean       @default(false) @map("is_private")
+  accessCode  String?       @map("access_code")
   createdBy   String        @map("created_by")
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
@@ -118,6 +154,7 @@ model Contest {
   participants ContestParticipant[]
   submissions  Submission[]
 
+  @@index([startTime, endTime])
   @@map("contests")
 }
 
@@ -127,6 +164,7 @@ model ContestProblem {
   problemId String  @map("problem_id")
   label     String  // e.g., "A", "B", "C"
   order     Int     @default(0)
+  points    Int     @default(100)
 
   contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
   problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
@@ -137,11 +175,12 @@ model ContestProblem {
 }
 
 model ContestParticipant {
-  id        String @id @default(cuid())
-  contestId String @map("contest_id")
-  userId    String @map("user_id")
-  penalty   Int    @default(0)
-  solved    Int    @default(0)
+  id           String   @id @default(cuid())
+  contestId    String   @map("contest_id")
+  userId       String   @map("user_id")
+  registeredAt DateTime @default(now()) @map("registered_at")
+  penalty      Int      @default(0)
+  solved       Int      @default(0)
 
   contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -151,22 +190,24 @@ model ContestParticipant {
 }
 
 model Submission {
-  id         String    @id @default(cuid())
-  userId     String    @map("user_id")
-  problemId  String    @map("problem_id")
-  contestId  String?   @map("contest_id")
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  problemId  String   @map("problem_id")
+  contestId  String?  @map("contest_id")
   language   Language
-  sourceCode String    @map("source_code") @db.Text
-  verdict    Verdict   @default(PENDING)
-  timeMs     Int?      @map("time_ms")
-  memoryKb   Int?      @map("memory_kb")
-  reportHash String?   @map("report_hash")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  sourceCode String   @map("source_code") @db.Text
+  verdict    Verdict  @default(PENDING)
+  timeMs     Int?     @map("time_ms")
+  memoryKb   Int?     @map("memory_kb")
+  reportHash String?  @map("report_hash")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  problem    Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  contest    Contest?  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  contest Contest? @relation(fields: [contestId], references: [id], onDelete: Cascade)
 
+  @@index([contestId, userId])
+  @@index([contestId, createdAt])
   @@map("submissions")
 }
 
@@ -179,7 +220,7 @@ model UserRatingHistory {
   delta     Int
   createdAt DateTime @default(now()) @map("created_at")
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_rating_history")
 }

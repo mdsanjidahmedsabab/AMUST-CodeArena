@@ -1,8 +1,15 @@
 import { Router } from 'express';
+import authRoutes from './auth.js';
+import problemRoutes from './problems.js';
+import userRoutes from './users.js';
+import contestRoutes from './contests.js';
+import submissionRoutes from './submissions.js';
+import aiRoutes from './ai.js';
+import analyticsRoutes from './analytics.js';
 
 const router = Router();
 
-// ── Health Check ──
+// ── Health check ──
 router.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -11,13 +18,13 @@ router.get('/health', (_req, res) => {
   });
 });
 
-// Future route modules will be mounted here:
-// router.use('/auth',       authRoutes);
-// router.use('/problems',   problemRoutes);
-// router.use('/contests',   contestRoutes);
-// router.use('/submissions', submissionRoutes);
-// router.use('/oj',         ojRoutes);
-// router.use('/ai',         aiRoutes);
-// router.use('/analytics',  analyticsRoutes);
+// ── Mounted routes ──
+router.use('/auth', authRoutes);
+router.use('/problems', problemRoutes);
+router.use('/users', userRoutes);
+router.use('/contests', contestRoutes);
+router.use('/submissions', submissionRoutes);
+router.use('/ai', aiRoutes);
+router.use('/analytics', analyticsRoutes);
 
 export default router;

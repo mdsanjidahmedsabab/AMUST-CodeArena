@@ -8,14 +8,18 @@
     "server"
   ],
   "scripts": {
-    "dev": "npm run dev:server & npm run dev:client",
-    "dev:client": "npm -w client run dev",
-    "dev:server": "npm -w server run dev",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server",
     "build": "npm -w client run build",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "db:generate": "npm -w server run db:generate",
     "db:migrate": "npm -w server run db:migrate",
-    "db:push": "npm -w server run db:push"
+    "db:push": "npm -w server run db:push",
+    "db:seed": "npm -w server run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
   }
 }

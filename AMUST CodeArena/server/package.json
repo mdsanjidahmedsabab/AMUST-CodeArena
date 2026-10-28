@@ -4,18 +4,25 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.js",
+    "dev": "node --watch --watch-path=src src/index.js",
     "start": "node src/index.js",
     "db:generate": "npx prisma generate",
     "db:migrate": "npx prisma migrate dev",
     "db:push": "npx prisma db push",
-    "db:studio": "npx prisma studio"
+    "db:seed": "node seeds/seed.js",
+    "db:studio": "npx prisma studio",
+    "test:ai": "node test/ai.test.js",
+    "test:analytics": "node test/analytics.test.js",
+    "test:diagnostics": "node test/diagnostics.test.js",
+    "test:contests": "node test/contests.test.js",
+    "test:submissions": "node test/submissions.test.js"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",
     "@prisma/client": "^6.8.2",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.34.8",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
@@ -23,6 +30,8 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.6.1",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.5.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.4"
   },
   "devDependencies": {
