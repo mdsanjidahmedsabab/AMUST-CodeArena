@@ -11,11 +11,15 @@
     "db:push": "npx prisma db push",
     "db:seed": "node seeds/seed.js",
     "db:studio": "npx prisma studio",
+    "test:auth": "node test/auth.test.js",
+    "test:problems": "node test/problems.test.js",
+    "test:contests": "node test/contests.test.js",
     "test:ai": "node test/ai.test.js",
     "test:analytics": "node test/analytics.test.js",
     "test:diagnostics": "node test/diagnostics.test.js",
-    "test:contests": "node test/contests.test.js",
+    "test:proctor": "node test/proctoring.test.js",
     "test:proctoring": "node test/proctoring.test.js",
+    "test:telemetry": "node test/proctoring.test.js",
     "test:submissions": "node test/submissions.test.js"
   },
   "dependencies": {

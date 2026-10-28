@@ -117,6 +117,7 @@ export default function App() {
                 <Route path="/teacher/problems/new" element={<TeacherProblemEditor />} />
                 <Route path="/teacher/problems/:id/edit" element={<TeacherProblemEditor />} />
                 <Route path="/teacher/contests/:slug/monitor" element={<ContestMonitor />} />
+                <Route path="/contests/:slug/monitor" element={<ContestMonitor />} />
               </Route>
 
               {/* Default redirect */}
