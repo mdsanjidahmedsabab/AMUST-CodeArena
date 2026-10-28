@@ -9,12 +9,17 @@ import jwt from 'jsonwebtoken';
  */
 export function authenticate(req, res, next) {
   const header = req.headers.authorization;
+  let token = null;
 
-  if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required' });
+  if (header?.startsWith('Bearer ')) {
+    token = header.slice(7);
+  } else if (req.query?.token) {
+    token = String(req.query.token);
   }
 
-  const token = header.slice(7);
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -32,12 +37,19 @@ export function authenticate(req, res, next) {
  */
 export function optionalAuthenticate(req, _res, next) {
   const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) {
+  let token = null;
+
+  if (header?.startsWith('Bearer ')) {
+    token = header.slice(7);
+  } else if (req.query?.token) {
+    token = String(req.query.token);
+  }
+
+  if (!token) {
     req.user = null;
     return next();
   }
 
-  const token = header.slice(7);
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload;

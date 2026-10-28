@@ -6,8 +6,8 @@
  * Only accessible to TEACHER role (enforced by ProtectedRoute in App.jsx).
  */
 
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard,
@@ -19,15 +19,10 @@ import {
   Plus,
   Trophy,
   AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Cpu,
   Layers,
-  Flame,
-  TrendingDown,
   RefreshCw,
   ExternalLink,
+  Radio,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import UploadDropzone from '../components/UploadDropzone';
@@ -49,14 +44,58 @@ function StatCard({ icon: Icon, label, value, subtext, color = 'text-blue-400' }
   );
 }
 
+function AnalyticsSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      {/* 4 KPI cards skeleton */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+            <div className="h-3 w-24 bg-slate-800 rounded" />
+            <div className="h-7 w-20 bg-slate-700/60 rounded" />
+            <div className="h-2.5 w-32 bg-slate-800/60 rounded" />
+          </div>
+        ))}
+      </div>
+
+      {/* Problem breakdown skeleton */}
+      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="h-4 w-52 bg-slate-800 rounded" />
+          <div className="h-3 w-24 bg-slate-800/60 rounded" />
+        </div>
+        <div className="space-y-2.5 pt-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-12 bg-slate-950/60 border border-slate-800/60 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TeacherDashboard() {
   const { user } = useAuth();
+  const location = useLocation();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'testcases' | 'import'
   const [selectedContestSlug, setSelectedContestSlug] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [importResult, setImportResult] = useState(null);
+
+  // Auto-switch to analytics tab and scroll down if #cohort or #cohort-heatmap is anchored
+  useEffect(() => {
+    if (location.hash === '#cohort' || location.hash === '#cohort-heatmap') {
+      setActiveTab('analytics');
+      setTimeout(() => {
+        const el = document.getElementById('cohort-heatmap');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 150);
+    }
+  }, [location.hash]);
 
   // 1. Fetch Problem Bank Statistics
   const { data: problemsData } = useQuery({
@@ -68,7 +107,7 @@ export default function TeacherDashboard() {
   });
 
   // 2. Fetch Contests List
-  const { data: contestsData } = useQuery({
+  const { data: contestsData, isLoading: isLoadingContests } = useQuery({
     queryKey: ['contests', 'teacher-list'],
     queryFn: async () => {
       const data = await fetchContests();
@@ -87,7 +126,12 @@ export default function TeacherDashboard() {
   // 3. Fetch Selected Contest Analytics
   const activeSlug = selectedContestSlug || contestsData?.all?.[0]?.slug;
 
-  const { data: contestAnalytics, isLoading: isLoadingAnalytics } = useQuery({
+  const {
+    data: contestAnalytics,
+    isLoading: isLoadingAnalytics,
+    isError: isErrorAnalytics,
+    error: analyticsError,
+  } = useQuery({
     queryKey: ['analytics', 'contest', activeSlug],
     queryFn: () => (activeSlug ? fetchContestAnalytics(activeSlug) : null),
     enabled: Boolean(activeSlug),
@@ -135,7 +179,19 @@ export default function TeacherDashboard() {
   }
 
   const allContests = contestsData?.all || [];
-  const currentContest = allContests.find((c) => c.slug === activeSlug) || allContests[0];
+
+  // Safe extraction of contest analytics properties
+  const summary = contestAnalytics?.summary || contestAnalytics?.metrics || {};
+  const totalSubmissions = summary?.totalSubmissions ?? 0;
+  const totalActiveParticipants = summary?.totalActiveParticipants ?? 0;
+  const totalRegistered = summary?.totalRegistered ?? 0;
+  const overallSolveRate = summary?.overallSolveRate ?? summary?.overallAccuracy ?? 0;
+  const primaryClassBottleneck = summary?.primaryClassBottleneck || 'None Detected';
+
+  const bottleneckTags = contestAnalytics?.classBottleneckTags || contestAnalytics?.bottleneckTags || [];
+  const problemsList = contestAnalytics?.problems || contestAnalytics?.problemAnalytics || [];
+  const matrixTags = cohortHeatmap?.tags || [];
+  const matrixRows = cohortHeatmap?.matrix || [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-300">
@@ -183,7 +239,7 @@ export default function TeacherDashboard() {
         <StatCard
           icon={Users}
           label="Cohort Size"
-          value={cohortHeatmap?.matrix?.length ?? contestAnalytics?.summary?.totalRegistered ?? '—'}
+          value={matrixRows.length > 0 ? matrixRows.length : totalRegistered > 0 ? totalRegistered : '—'}
           subtext="Enrolled participants"
           color="text-amber-400"
         />
@@ -254,26 +310,60 @@ export default function TeacherDashboard() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Viewing:</span>
-              <select
-                value={activeSlug}
-                onChange={(e) => setSelectedContestSlug(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 cursor-pointer"
-              >
-                {allContests.map((c) => (
-                  <option key={c.slug} value={c.slug}>
-                    {c.title} ({c.status})
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center gap-3">
+              {activeSlug && (
+                <Link
+                  to={`/teacher/contests/${activeSlug}/monitor`}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-1.5 transition"
+                >
+                  <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                  <span>Live Proctor Console</span>
+                </Link>
+              )}
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Viewing:</span>
+                <select
+                  value={activeSlug || ''}
+                  onChange={(e) => setSelectedContestSlug(e.target.value)}
+                  disabled={isLoadingContests || allContests.length === 0}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500 cursor-pointer disabled:opacity-50"
+                >
+                  {allContests.length > 0 ? (
+                    allContests.map((c) => (
+                      <option key={c.slug} value={c.slug}>
+                        {c.title} ({c.status})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No contests available</option>
+                  )}
+                </select>
+              </div>
             </div>
           </div>
 
           {isLoadingAnalytics ? (
-            <div className="p-12 text-center flex flex-col items-center gap-3">
-              <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
-              <span className="text-xs text-slate-400">Aggregating submission logs and calculating ICPC metrics...</span>
+            <AnalyticsSkeleton />
+          ) : isErrorAnalytics ? (
+            <div className="p-8 text-center bg-slate-900/60 border border-slate-800 rounded-2xl space-y-3">
+              <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 mx-auto flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="text-sm font-semibold text-white">Analytics Unavailable for Selected Contest</div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                {analyticsError?.response?.data?.error || analyticsError?.message || 'Unable to retrieve telemetry or submission metrics for this contest.'}
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ['analytics', 'contest', activeSlug] })}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Retry Calculation</span>
+                </button>
+              </div>
             </div>
           ) : contestAnalytics ? (
             <>
@@ -282,17 +372,17 @@ export default function TeacherDashboard() {
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
                   <span className="text-slate-400 text-xs">Total Submissions</span>
                   <p className="text-2xl font-bold text-white">
-                    {contestAnalytics.summary.totalSubmissions}
+                    {totalSubmissions}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    {contestAnalytics.summary.totalActiveParticipants} active / {contestAnalytics.summary.totalRegistered} enrolled
+                    {totalActiveParticipants} active / {totalRegistered} enrolled
                   </p>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
                   <span className="text-slate-400 text-xs">Class Solve Rate</span>
                   <p className="text-2xl font-bold text-emerald-400">
-                    {contestAnalytics.summary.overallSolveRate}%
+                    {overallSolveRate}%
                   </p>
                   <p className="text-[11px] text-slate-500">Unique accepted solutions</p>
                 </div>
@@ -301,7 +391,7 @@ export default function TeacherDashboard() {
                   <span className="text-slate-400 text-xs">Primary Bottleneck Topic</span>
                   <div className="flex items-center gap-2">
                     <p className="text-base font-bold text-rose-400 truncate">
-                      {contestAnalytics.summary.primaryClassBottleneck || 'None Detected'}
+                      {primaryClassBottleneck}
                     </p>
                   </div>
                   <p className="text-[11px] text-slate-500">Highest student error ratio</p>
@@ -310,20 +400,24 @@ export default function TeacherDashboard() {
                 <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
                   <span className="text-slate-400 text-xs">Leaderboard Standings</span>
                   <div>
-                    <Link
-                      to={`/contests/${activeSlug}/leaderboard`}
-                      className="text-xs font-semibold text-purple-400 hover:text-purple-300 inline-flex items-center gap-1.5 mt-1"
-                    >
-                      <span>View Live Scoreboard</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
+                    {activeSlug ? (
+                      <Link
+                        to={`/contests/${activeSlug}/leaderboard`}
+                        className="text-xs font-semibold text-purple-400 hover:text-purple-300 inline-flex items-center gap-1.5 mt-1"
+                      >
+                        <span>View Live Scoreboard</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-slate-500 mt-1 inline-block">Scoreboard N/A</span>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-500">ICPC 20-min penalty rules</p>
                 </div>
               </div>
 
               {/* Class Bottleneck Topics Alerts */}
-              {contestAnalytics.classBottleneckTags && contestAnalytics.classBottleneckTags.length > 0 && (
+              {bottleneckTags && bottleneckTags.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -331,9 +425,9 @@ export default function TeacherDashboard() {
                   </h3>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {contestAnalytics.classBottleneckTags.map((bn) => (
+                    {bottleneckTags.map((bn) => (
                       <div
-                        key={bn.tag}
+                        key={bn.tag || bn.label}
                         className={`p-4 rounded-xl border space-y-2 ${
                           bn.severity === 'CRITICAL'
                             ? 'bg-rose-950/20 border-rose-800/40 text-rose-300'
@@ -342,7 +436,7 @@ export default function TeacherDashboard() {
                       >
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-xs uppercase tracking-wide">
-                            {bn.label}
+                            {bn.label || bn.tag}
                           </span>
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -351,14 +445,14 @@ export default function TeacherDashboard() {
                                 : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                             }`}
                           >
-                            {bn.severity}
+                            {bn.severity || 'WARNING'}
                           </span>
                         </div>
                         <div className="text-xs text-slate-400">
-                          <span className="text-white font-semibold">{bn.errorRate}%</span> error rate across {bn.totalSubmissions} attempts.
+                          <span className="text-white font-semibold">{bn.errorRate ?? 0}%</span> error rate across {bn.totalSubmissions ?? 0} attempts.
                         </div>
                         <p className="text-[11px] text-slate-500">
-                          Recommended action: Schedule a review session covering {bn.label} fundamentals and boundary invariants.
+                          Recommended action: Schedule a review session covering {bn.label || bn.tag} fundamentals and boundary invariants.
                         </p>
                       </div>
                     ))}
@@ -374,101 +468,107 @@ export default function TeacherDashboard() {
                     <span>Problem-by-Problem Solve & Verdict Breakdown</span>
                   </h3>
                   <span className="text-xs text-slate-400 font-mono">
-                    {contestAnalytics.problems.length} Competition Problems
+                    {problemsList.length} Competition Problems
                   </span>
                 </div>
 
-                <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400 font-semibold">
-                        <th className="py-3 px-4 w-12 text-center">#</th>
-                        <th className="py-3 px-4">Problem</th>
-                        <th className="py-3 px-3">Difficulty</th>
-                        <th className="py-3 px-3 text-center">Solved / Attempted</th>
-                        <th className="py-3 px-3 text-center">Solve Rate</th>
-                        <th className="py-3 px-3 text-center">Avg Attempts</th>
-                        <th className="py-3 px-4 w-48">Verdict Distribution</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {contestAnalytics.problems.map((p) => {
-                        const totalV = p.totalSubmissions || 1;
-                        const acPct = Math.round(((p.verdictCounts?.AC || 0) / totalV) * 100);
-                        const waPct = Math.round(((p.verdictCounts?.WA || 0) / totalV) * 100);
-                        const tlePct = Math.round(((p.verdictCounts?.TLE || 0) / totalV) * 100);
-                        const cePct = Math.round(((p.verdictCounts?.CE || 0) / totalV) * 100);
+                {problemsList.length > 0 ? (
+                  <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400 font-semibold">
+                          <th className="py-3 px-4 w-12 text-center">#</th>
+                          <th className="py-3 px-4">Problem</th>
+                          <th className="py-3 px-3">Difficulty</th>
+                          <th className="py-3 px-3 text-center">Solved / Attempted</th>
+                          <th className="py-3 px-3 text-center">Solve Rate</th>
+                          <th className="py-3 px-3 text-center">Avg Attempts</th>
+                          <th className="py-3 px-4 w-48">Verdict Distribution</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {problemsList.map((p) => {
+                          const totalV = Math.max(p.totalSubmissions || 0, 1);
+                          const acPct = Math.round(((p.verdictCounts?.AC || 0) / totalV) * 100);
+                          const waPct = Math.round(((p.verdictCounts?.WA || 0) / totalV) * 100);
+                          const tlePct = Math.round(((p.verdictCounts?.TLE || 0) / totalV) * 100);
+                          const cePct = Math.round(((p.verdictCounts?.CE || 0) / totalV) * 100);
 
-                        return (
-                          <tr key={p.problemId} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="py-3.5 px-4 text-center font-bold font-mono text-purple-400">
-                              {p.label}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <span className="font-semibold text-white block">{p.title}</span>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                {p.tags?.map((t) => (
-                                  <span
-                                    key={t}
-                                    className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-400"
-                                  >
-                                    {t}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-3">
-                              <span className="text-slate-300">{p.difficulty}</span>
-                              <span className="text-[10px] text-slate-500 font-mono block">
-                                {p.rating} pts
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-3 text-center font-mono">
-                              <span className="text-emerald-400 font-bold">{p.uniqueSolved}</span> /{' '}
-                              <span className="text-slate-400">{p.uniqueAttempted}</span>
-                            </td>
-                            <td className="py-3.5 px-3 text-center font-mono font-bold">
-                              <span
-                                className={
-                                  p.solveRate >= 60
-                                    ? 'text-emerald-400'
-                                    : p.solveRate >= 30
-                                    ? 'text-amber-400'
-                                    : 'text-rose-400'
-                                }
-                              >
-                                {p.solveRate}%
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-3 text-center font-mono text-slate-300">
-                              {p.avgAttemptsToSolve > 0 ? `${p.avgAttemptsToSolve}x` : '—'}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              {/* Stacked Verdict Distribution Bar */}
-                              <div className="space-y-1">
-                                <div className="h-2 rounded-full bg-slate-800 flex overflow-hidden">
-                                  <div style={{ width: `${acPct}%` }} className="bg-emerald-500" title={`AC: ${p.verdictCounts?.AC || 0}`} />
-                                  <div style={{ width: `${waPct}%` }} className="bg-rose-500" title={`WA: ${p.verdictCounts?.WA || 0}`} />
-                                  <div style={{ width: `${tlePct}%` }} className="bg-amber-500" title={`TLE: ${p.verdictCounts?.TLE || 0}`} />
-                                  <div style={{ width: `${cePct}%` }} className="bg-slate-500" title={`CE: ${p.verdictCounts?.CE || 0}`} />
+                          return (
+                            <tr key={p.problemId || p.id || p.label} className="hover:bg-slate-900/40 transition-colors">
+                              <td className="py-3.5 px-4 text-center font-bold font-mono text-purple-400">
+                                {p.label || '—'}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className="font-semibold text-white block">{p.title || 'Untitled Problem'}</span>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  {p.tags?.map((t) => (
+                                    <span
+                                      key={t}
+                                      className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-400"
+                                    >
+                                      {t}
+                                    </span>
+                                  ))}
                                 </div>
-                                <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                                  <span className="text-emerald-400">{p.verdictCounts?.AC || 0} AC</span>
-                                  <span className="text-rose-400">{p.verdictCounts?.WA || 0} WA</span>
-                                  <span className="text-amber-400">{p.verdictCounts?.TLE || 0} TLE</span>
+                              </td>
+                              <td className="py-3.5 px-3">
+                                <span className="text-slate-300">{p.difficulty || 'Medium'}</span>
+                                <span className="text-[10px] text-slate-500 font-mono block">
+                                  {p.rating ?? '—'} pts
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono">
+                                <span className="text-emerald-400 font-bold">{p.uniqueSolved ?? 0}</span> /{' '}
+                                <span className="text-slate-400">{p.uniqueAttempted ?? 0}</span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono font-bold">
+                                <span
+                                  className={
+                                    (p.solveRate ?? 0) >= 60
+                                      ? 'text-emerald-400'
+                                      : (p.solveRate ?? 0) >= 30
+                                      ? 'text-amber-400'
+                                      : 'text-rose-400'
+                                  }
+                                >
+                                  {p.solveRate ?? 0}%
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-3 text-center font-mono text-slate-300">
+                                {(p.avgAttemptsToSolve || 0) > 0 ? `${p.avgAttemptsToSolve}x` : '—'}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {/* Stacked Verdict Distribution Bar */}
+                                <div className="space-y-1">
+                                  <div className="h-2 rounded-full bg-slate-800 flex overflow-hidden">
+                                    <div style={{ width: `${acPct}%` }} className="bg-emerald-500" title={`AC: ${p.verdictCounts?.AC || 0}`} />
+                                    <div style={{ width: `${waPct}%` }} className="bg-rose-500" title={`WA: ${p.verdictCounts?.WA || 0}`} />
+                                    <div style={{ width: `${tlePct}%` }} className="bg-amber-500" title={`TLE: ${p.verdictCounts?.TLE || 0}`} />
+                                    <div style={{ width: `${cePct}%` }} className="bg-slate-500" title={`CE: ${p.verdictCounts?.CE || 0}`} />
+                                  </div>
+                                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                                    <span className="text-emerald-400">{p.verdictCounts?.AC || 0} AC</span>
+                                    <span className="text-rose-400">{p.verdictCounts?.WA || 0} WA</span>
+                                    <span>{p.totalSubmissions || 0} total</span>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/40 rounded-xl border border-slate-800">
+                    No problems or submissions recorded for this contest yet.
+                  </div>
+                )}
               </div>
 
               {/* Cohort Topic Heatmap Matrix */}
-              <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div id="cohort-heatmap" className="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-6 space-y-4 scroll-mt-20">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -497,8 +597,12 @@ export default function TeacherDashboard() {
                 </div>
 
                 {isLoadingHeatmap ? (
-                  <div className="p-8 text-center text-xs text-slate-500">Loading cohort matrix...</div>
-                ) : cohortHeatmap && cohortHeatmap.matrix ? (
+                  <div className="p-6 space-y-2.5 animate-pulse">
+                    <div className="h-8 bg-slate-800/40 rounded-xl" />
+                    <div className="h-8 bg-slate-800/30 rounded-xl" />
+                    <div className="h-8 bg-slate-800/20 rounded-xl" />
+                  </div>
+                ) : matrixRows.length > 0 && matrixTags.length > 0 ? (
                   <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
@@ -506,7 +610,7 @@ export default function TeacherDashboard() {
                           <th className="py-3 px-4">Student</th>
                           <th className="py-3 px-3">University ID</th>
                           <th className="py-3 px-3">Rating / Tier</th>
-                          {cohortHeatmap.tags.map((tag) => (
+                          {matrixTags.map((tag) => (
                             <th key={tag} className="py-3 px-3 text-center">
                               {tag}
                             </th>
@@ -514,20 +618,20 @@ export default function TeacherDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
-                        {cohortHeatmap.matrix.map((row) => (
+                        {matrixRows.map((row) => (
                           <tr key={row.userId} className="hover:bg-slate-900/40 transition-colors">
                             <td className="py-3 px-4">
-                              <span className="font-semibold text-white block">{row.name}</span>
+                              <span className="font-semibold text-white block">{row.name || 'Unknown'}</span>
                               <span className="text-[10px] text-slate-500">{row.email}</span>
                             </td>
                             <td className="py-3 px-3 font-mono text-slate-300">
                               {row.universityId || '—'}
                             </td>
                             <td className="py-3 px-3">
-                              <span className="font-mono text-purple-400 font-bold">{row.rating}</span>
-                              <span className="text-[10px] text-slate-500 block">{row.tier}</span>
+                              <span className="font-mono text-purple-400 font-bold">{row.rating ?? 1200}</span>
+                              <span className="text-[10px] text-slate-500 block">{row.tier || 'Newbie'}</span>
                             </td>
-                            {cohortHeatmap.tags.map((tag) => {
+                            {matrixTags.map((tag) => {
                               const cell = row.scores?.[tag];
                               const isSolved = cell?.status === 'SOLVED';
                               const isFailed = cell?.status === 'FAILED';
@@ -544,7 +648,7 @@ export default function TeacherDashboard() {
                                     }`}
                                     title={
                                       cell?.attempted
-                                        ? `${cell.attempted} attempts (${cell.solved} AC)`
+                                        ? `${cell.attempted} attempts (${cell.solved ?? 0} AC)`
                                         : 'Unattempted'
                                     }
                                   >
@@ -565,7 +669,7 @@ export default function TeacherDashboard() {
                     </table>
                   </div>
                 ) : (
-                  <div className="p-8 text-center text-xs text-slate-500">
+                  <div className="p-8 text-center text-xs text-slate-500 bg-slate-950/40 rounded-xl border border-slate-800">
                     No participants or submissions recorded for this contest yet.
                   </div>
                 )}

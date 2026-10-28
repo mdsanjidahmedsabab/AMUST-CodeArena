@@ -18,6 +18,8 @@ import RegisterPage      from './pages/RegisterPage';
 import StudentDashboard  from './pages/StudentDashboard';
 import TeacherDashboard  from './pages/TeacherDashboard';
 import TeacherProblemEditor from './pages/TeacherProblemEditor';
+import ContestMonitor     from './pages/ContestMonitor';
+import TeacherAccessRequired from './pages/TeacherAccessRequired';
 import ProblemBankPage   from './pages/ProblemBankPage';
 import ProblemDetailPage from './pages/ProblemDetailPage';
 import ContestsHubPage         from './pages/ContestsHubPage';
@@ -58,6 +60,9 @@ function ProtectedRoute({ role }) {
   }
 
   if (role && user.role !== role) {
+    if (role === 'TEACHER') {
+      return <TeacherAccessRequired />;
+    }
     return <Navigate to="/problems" replace />;
   }
 
@@ -107,9 +112,11 @@ export default function App() {
 
               {/* Teacher-only routes */}
               <Route element={<ProtectedRoute role="TEACHER" />}>
+                <Route path="/teacher" element={<TeacherDashboard />} />
                 <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
                 <Route path="/teacher/problems/new" element={<TeacherProblemEditor />} />
                 <Route path="/teacher/problems/:id/edit" element={<TeacherProblemEditor />} />
+                <Route path="/teacher/contests/:slug/monitor" element={<ContestMonitor />} />
               </Route>
 
               {/* Default redirect */}
@@ -134,7 +141,7 @@ function RoleRedirect() {
   const { user } = useAuth();
   return (
     <Navigate
-      to={user?.role === 'TEACHER' ? '/teacher/dashboard' : '/dashboard'}
+      to={user?.role === 'TEACHER' ? '/teacher' : '/dashboard'}
       replace
     />
   );

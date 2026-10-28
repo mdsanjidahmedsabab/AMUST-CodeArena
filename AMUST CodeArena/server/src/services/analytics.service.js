@@ -883,6 +883,18 @@ export async function getContestAnalytics(contestIdentifier) {
     totalVerdictCounts[v] = (totalVerdictCounts[v] || 0) + 1;
   }
 
+  const summary = {
+    totalRegistered,
+    totalActiveParticipants,
+    engagementRate: totalRegistered > 0 ? Number(((totalActiveParticipants / totalRegistered) * 100).toFixed(1)) : 0,
+    totalSubmissions,
+    totalAccepted: totalVerdictCounts.AC,
+    totalErrors: totalSubmissions - totalVerdictCounts.AC,
+    overallSolveRate: totalSubmissions > 0 ? Number(((totalVerdictCounts.AC / totalSubmissions) * 100).toFixed(1)) : 0,
+    overallAccuracy: totalSubmissions > 0 ? Number(((totalVerdictCounts.AC / totalSubmissions) * 100).toFixed(1)) : 0,
+    primaryClassBottleneck: bottleneckTags[0] ? bottleneckTags[0].label : null,
+  };
+
   return {
     contest: {
       id: contest.id,
@@ -902,8 +914,11 @@ export async function getContestAnalytics(contestIdentifier) {
       overallAccuracy: totalSubmissions > 0 ? Number(((totalVerdictCounts.AC / totalSubmissions) * 100).toFixed(1)) : 0,
       verdictDistribution: totalVerdictCounts,
     },
+    summary,
     problemAnalytics,
+    problems: problemAnalytics,
     bottleneckTags,
+    classBottleneckTags: bottleneckTags,
   };
 }
 

@@ -210,4 +210,36 @@ router.get('/me', authenticate, async (req, res, next) => {
   }
 });
 
+// ─────────────────────────────────────────
+// POST /api/auth/dev-switch-role
+// Development & Demo mode: Switch user role dynamically
+// ─────────────────────────────────────────
+router.post('/dev-switch-role', authenticate, async (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Role switching is disabled in production.' });
+    }
+
+    const { role } = req.body;
+    if (!['STUDENT', 'TEACHER', 'ADMIN'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be STUDENT, TEACHER, or ADMIN.' });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { role },
+    });
+
+    const accessToken = signAccessToken({ id: updatedUser.id, role: updatedUser.role });
+
+    return res.json({
+      message: `Role switched to ${role}`,
+      accessToken,
+      user: safeUser(updatedUser),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

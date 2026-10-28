@@ -37,8 +37,12 @@ import {
   ExternalLink,
   RotateCcw,
   Sparkles,
+  Shield,
+  ShieldAlert,
 } from 'lucide-react';
 import { fetchContestArena } from '../api/contests';
+import useContestProctor from '../hooks/useContestProctor';
+import ProctorWarningModal from '../components/ProctorWarningModal';
 import api from '../api/client';
 
 const STARTER_TEMPLATES = {
@@ -172,6 +176,29 @@ export default function ContestArenaPage() {
       ...prev,
       [`${currentProblem.label}_${language}`]: newCode,
     }));
+  };
+
+  // ── Milestone 6: Live Contest Anti-Cheat Proctoring ──────────────────────────
+  const proctor = useContestProctor({
+    slug,
+    enabled: Boolean(arena),
+    isLive: Boolean(arena),
+  });
+
+  const handleEditorMount = (editor) => {
+    editor.onDidPaste((e) => {
+      try {
+        const model = editor.getModel();
+        if (model) {
+          const pastedText = model.getValueInRange(e.range);
+          if (pastedText && pastedText.length >= 200) {
+            proctor.handlePasteBurst(pastedText);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    });
   };
 
   // ── Render Markdown with KaTeX ──────────────────────────────────────────────
@@ -526,6 +553,23 @@ export default function ContestArenaPage() {
             <span>{formattedTimer}</span>
           </div>
 
+          {/* Proctor Integrity Meter */}
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs font-mono">
+            <Shield className={`w-3.5 h-3.5 ${proctor.integrityScore >= 80 ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <span className="text-slate-400">Integrity:</span>
+            <span
+              className={`font-bold ${
+                proctor.integrityScore >= 80
+                  ? 'text-emerald-400'
+                  : proctor.integrityScore >= 50
+                  ? 'text-amber-400'
+                  : 'text-rose-400'
+              }`}
+            >
+              {proctor.integrityScore}%
+            </span>
+          </div>
+
           <Link
             to={`/contests/${slug}/leaderboard`}
             target="_blank"
@@ -537,6 +581,35 @@ export default function ContestArenaPage() {
           </Link>
         </div>
       </header>
+
+      {/* ── Advisory Banner Toast ────────────────────────────────────────── */}
+      {proctor.advisoryBanner && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-amber-950/95 border border-amber-500/80 text-amber-200 px-4 py-2.5 rounded-2xl text-xs flex items-center gap-2.5 shadow-2xl animate-in slide-in-from-top-4 backdrop-blur-md">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="space-y-0.5">
+            <span className="font-bold block">{proctor.advisoryBanner.title}</span>
+            <span className="text-amber-300/80 text-[11px] block">{proctor.advisoryBanner.message}</span>
+          </div>
+          <button
+            onClick={() => proctor.setAdvisoryBanner(null)}
+            className="ml-2 text-amber-400 hover:text-white text-xs font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* ── Progressive Warning Modal ────────────────────────────────────── */}
+      <ProctorWarningModal
+        modalState={proctor.warningModal}
+        onClose={proctor.closeWarningModal}
+        integrityScore={proctor.integrityScore}
+        warningsCount={proctor.warningsCount}
+        isDisqualified={proctor.isDisqualified}
+        disqualifyReason={proctor.disqualifyReason}
+        onEnterFullscreen={proctor.enterFullscreen}
+        isFullscreen={proctor.isFullscreen}
+      />
 
       {/* ── Submission Toast Feedback ────────────────────────────────────────── */}
       {submissionFeedback && (
@@ -689,6 +762,7 @@ export default function ContestArenaPage() {
               language={LANGUAGE_OPTIONS.find((l) => l.value === language)?.monaco || 'cpp'}
               value={currentCode}
               onChange={handleCodeChange}
+              onMount={handleEditorMount}
               options={{
                 fontSize: 13,
                 fontFamily: `'Fira Code', 'JetBrains Mono', Consolas, monospace`,

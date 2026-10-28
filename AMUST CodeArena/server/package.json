@@ -15,6 +15,7 @@
     "test:analytics": "node test/analytics.test.js",
     "test:diagnostics": "node test/diagnostics.test.js",
     "test:contests": "node test/contests.test.js",
+    "test:proctoring": "node test/proctoring.test.js",
     "test:submissions": "node test/submissions.test.js"
   },
   "dependencies": {

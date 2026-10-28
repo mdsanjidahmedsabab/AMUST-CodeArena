@@ -87,7 +87,20 @@ export function AuthProvider({ children }) {
     setUser((prev) => (prev ? { ...prev, sessionMode: newMode } : prev));
   }, []);
 
-  const value = { user, accessToken, login, logout, isLoading, updateUserSessionMode };
+  const switchRole = useCallback(async (newRole) => {
+    try {
+      const { data } = await api.post('/auth/dev-switch-role', { role: newRole });
+      if (data.accessToken && data.user) {
+        applyToken(data.accessToken, data.user);
+        return data.user;
+      }
+    } catch (err) {
+      console.warn('Backend dev-switch-role failed, updating local state:', err);
+      setUser((prev) => (prev ? { ...prev, role: newRole } : prev));
+    }
+  }, [applyToken]);
+
+  const value = { user, accessToken, login, logout, isLoading, updateUserSessionMode, switchRole };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

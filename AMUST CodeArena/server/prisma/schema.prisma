@@ -76,6 +76,23 @@ enum TopicTag {
   BITMASK
 }
 
+enum ViolationType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  FULLSCREEN_EXIT
+  PASTE_BURST
+  MULTIPLE_DISPLAYS
+  UNAUTHORIZED_DEVICE
+  HEARTBEAT
+}
+
+enum ViolationSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 // ── Models ──
 
 model User {
@@ -95,6 +112,7 @@ model User {
   submissions         Submission[]
   ratingHistory       UserRatingHistory[]
   contestParticipants ContestParticipant[]
+  proctorLogs         ProctorLog[]
 
   @@map("users")
 }
@@ -153,6 +171,7 @@ model Contest {
   problems     ContestProblem[]
   participants ContestParticipant[]
   submissions  Submission[]
+  proctorLogs  ProctorLog[]
 
   @@index([startTime, endTime])
   @@map("contests")
@@ -175,18 +194,43 @@ model ContestProblem {
 }
 
 model ContestParticipant {
-  id           String   @id @default(cuid())
-  contestId    String   @map("contest_id")
-  userId       String   @map("user_id")
-  registeredAt DateTime @default(now()) @map("registered_at")
-  penalty      Int      @default(0)
-  solved       Int      @default(0)
+  id               String    @id @default(cuid())
+  contestId        String    @map("contest_id")
+  userId           String    @map("user_id")
+  registeredAt     DateTime  @default(now()) @map("registered_at")
+  penalty          Int       @default(0)
+  solved           Int       @default(0)
+  isDisqualified   Boolean   @default(false) @map("is_disqualified")
+  disqualifiedAt   DateTime? @map("disqualified_at")
+  disqualifyReason String?   @map("disqualify_reason")
+  warningsCount    Int       @default(0) @map("warnings_count")
+  integrityScore   Int       @default(100) @map("integrity_score")
+  lastHeartbeat    DateTime? @map("last_heartbeat")
 
   contest   Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([contestId, userId])
   @@map("contest_participants")
+}
+
+model ProctorLog {
+  id           String            @id @default(cuid())
+  contestId    String            @map("contest_id")
+  userId       String            @map("user_id")
+  eventType    ViolationType     @map("event_type")
+  severity     ViolationSeverity @default(LOW)
+  metadata     Json?
+  snapshotDiff String?           @map("snapshot_diff") @db.Text
+  flagged      Boolean           @default(false)
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  contest      Contest           @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([contestId, userId])
+  @@index([contestId, createdAt])
+  @@map("proctor_logs")
 }
 
 model Submission {
