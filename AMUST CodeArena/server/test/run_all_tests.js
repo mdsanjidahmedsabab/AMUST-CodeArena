@@ -1,7 +1,7 @@
 /**
  * test/run_all_tests.js
  * ─────────────────────
- * Master test runner executing all Milestone 1 to 6 test suites with benchmarks.
+ * Master test runner executing all Milestone 1 to 7 test suites with benchmarks.
  */
 
 import { exec } from 'node:child_process';
@@ -16,17 +16,20 @@ const serverDir = path.resolve(__dirname, '..');
 const execAsync = promisify(exec);
 
 const SUITES = [
-  { name: 'Milestone 1 & 2: Auth & RBAC', cmd: 'node test/auth.test.js' },
-  { name: 'Milestone 2: Problem Bank & Authoring', cmd: 'node test/problems.test.js' },
-  { name: 'Milestone 3: Contest Engine & ICPC Standings', cmd: 'node test/contests.test.js' },
-  { name: 'Milestone 4: Socratic AI & Gemini Engine', cmd: 'node test/ai.test.js' },
-  { name: 'Milestone 5: Weak-Topic Diagnostics & Analytics', cmd: 'node test/diagnostics.test.js' },
-  { name: 'Milestone 6: Live Anti-Cheat & Proctoring Surveillance', cmd: 'node test/proctoring.test.js' },
+  { name: 'Milestone 1 & 2: Auth & RBAC Boundaries', cmd: 'node test/auth.test.js' },
+  { name: 'Milestone 2: Problem Creation, Pagination & Authoring', cmd: 'node test/problems.test.js' },
+  { name: 'Milestone 3: Contest Lifecycle & Dynamic ICPC Scoring', cmd: 'node test/contests.test.js' },
+  { name: 'Milestone 4: Gemini Socratic State Machine & Guardrails', cmd: 'node test/ai.test.js' },
+  { name: 'Milestone 5: Topic Taxonomy & Weakness Radar Diagnostics', cmd: 'node test/diagnostics.test.js' },
+  { name: 'Milestone 6: Client Integrity Telemetry & Live Proctoring', cmd: 'node test/proctoring.test.js' },
+  { name: 'Milestone 7: Multi-Language Sandbox Judge (Time/Memory/CE)', cmd: 'node test/judge.test.js' },
+  { name: 'Milestone 7: Live Submission Pipeline & ICPC Updates', cmd: 'node test/submissions.test.js' },
+  { name: 'Milestone 8: Docker Judge Sandbox & Submission Queue', cmd: 'node test/docker_judge.test.js' },
 ];
 
 async function main() {
   console.log('================================================================');
-  console.log('   AMUST CodeArena — Master Automated Health Audit (M1 to M6)   ');
+  console.log('   AMUST CodeArena — Master Automated Health Audit (M1 to M8)   ');
   console.log('================================================================\n');
 
   const results = [];
@@ -43,7 +46,9 @@ async function main() {
     } catch (err) {
       const elapsed = ((performance.now() - start) / 1000).toFixed(2);
       console.log(`❌ FAIL (${elapsed}s)`);
-      console.error(err.stdout || err.message);
+      if (err.stdout) console.error(err.stdout);
+      if (err.stderr) console.error(err.stderr);
+      if (!err.stdout && !err.stderr) console.error(err.message);
       results.push({ name: suite.name, status: 'FAIL', elapsed: `${elapsed}s`, error: err.message });
       allPassed = false;
     }

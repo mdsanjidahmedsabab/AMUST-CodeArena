@@ -74,6 +74,16 @@ export function AuthProvider({ children }) {
     return data.user;
   }, [applyToken]);
 
+  const loginWithOtp = useCallback(async (email, otp) => {
+    const { data } = await api.post('/auth/login-otp-verify', { email, otp });
+    applyToken(data.accessToken, data.user);
+    return data.user;
+  }, [applyToken]);
+
+  const setSession = useCallback((token, userData) => {
+    applyToken(token, userData);
+  }, [applyToken]);
+
   const logout = useCallback(async () => {
     try {
       await api.post('/auth/logout');
@@ -100,7 +110,17 @@ export function AuthProvider({ children }) {
     }
   }, [applyToken]);
 
-  const value = { user, accessToken, login, logout, isLoading, updateUserSessionMode, switchRole };
+  const value = {
+    user,
+    accessToken,
+    login,
+    loginWithOtp,
+    setSession,
+    logout,
+    isLoading,
+    updateUserSessionMode,
+    switchRole,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

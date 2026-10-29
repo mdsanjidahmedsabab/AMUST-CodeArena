@@ -13,6 +13,7 @@ import XLSX from 'xlsx';
 import { SAMPLE_PROBLEMS } from './sampleProblems.js';
 import { ingestSpreadsheet } from '../src/services/spreadsheet.service.js';
 import prisma from '../src/config/db.js';
+import { masterSeed } from '../prisma/seed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +62,9 @@ async function runSeed() {
 
     const totalCount = await prisma.problem.count();
     console.log(`✅ Total problems in database: ${totalCount}`);
+
+    // Run master production seed (accounts, contest, submissions)
+    await masterSeed();
   } catch (err) {
     console.error('❌ Seeding failed:', err);
     process.exit(1);

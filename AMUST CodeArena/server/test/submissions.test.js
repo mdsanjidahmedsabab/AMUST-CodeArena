@@ -75,7 +75,7 @@ async function runTests() {
 
   // ── Test 3: Official Submission with Broken Syntax (Must return CE) ──────────
   console.log('\n3. Testing Official Submission with Broken Syntax (Must return CE):');
-  const subBroken = await fetch(baseUrl, {
+  const subBroken = await fetch(`${baseUrl}?sync=true`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -98,7 +98,7 @@ async function runTests() {
 
   // ── Test 4: Official Submission with Incorrect Logic (Must return WA) ────────
   console.log('\n4. Testing Official Submission with Incorrect Logic (Must return WA):');
-  const subWrong = await fetch(baseUrl, {
+  const subWrong = await fetch(`${baseUrl}?sync=true`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -136,7 +136,7 @@ int main() {
 
   // ── Test 5: Official Submission with Correct Logic (Must return AC) ──────────
   console.log('\n5. Testing Official Submission with Correct Logic (Must return AC):');
-  const subCorrect = await fetch(baseUrl, {
+  const subCorrect = await fetch(`${baseUrl}?sync=true`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

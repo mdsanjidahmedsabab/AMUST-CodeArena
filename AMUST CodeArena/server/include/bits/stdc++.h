@@ -1,0 +1,52 @@
+// C++ Standard Library headers for Competitive Programming
+#ifndef _CODEARENA_STDCXX_H_
+#define _CODEARENA_STDCXX_H_
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <string>
+#include <vector>
+#include <deque>
+#include <list>
+#include <set>
+#include <map>
+#include <unordered_set>
+#include <unordered_map>
+#include <stack>
+#include <queue>
+#include <algorithm>
+#include <numeric>
+#include <cmath>
+#include <complex>
+#include <valarray>
+#include <bitset>
+#include <utility>
+#include <tuple>
+#include <iterator>
+#include <functional>
+#include <memory>
+#include <chrono>
+#include <random>
+#include <ratio>
+#include <limits>
+#include <type_traits>
+#include <cassert>
+#include <cctype>
+#include <cerrno>
+#include <cfloat>
+#include <ciso646>
+#include <climits>
+#include <clocale>
+#include <cmath>
+#include <csetjmp>
+#include <csignal>
+#include <cstdarg>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+
+#endif // _CODEARENA_STDCXX_H_

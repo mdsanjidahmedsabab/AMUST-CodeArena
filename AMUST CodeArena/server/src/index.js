@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 import routes from './routes/index.js';
 import prisma from './config/db.js';
+import { startSubmissionWorker, stopSubmissionWorker } from './workers/submissionWorker.js';
 
 // ── Process-level error protection ──
 process.on('uncaughtException', (err) => {
@@ -103,6 +104,7 @@ app.use((err, _req, res, _next) => {
 // ── Server startup and port conflict protection ──
 const server = app.listen(PORT, () => {
   console.log(`🚀 CodeArena API running on http://localhost:${PORT}`);
+  startSubmissionWorker();
 });
 
 server.on('error', (err) => {
@@ -122,6 +124,7 @@ const shutdown = (signal) => {
   console.log(`\n🛑 [Server] Received ${signal}. Closing CodeArena API server gracefully...`);
   server.close(async () => {
     try {
+      await stopSubmissionWorker();
       await prisma.$disconnect();
       console.log('✅ PostgreSQL connection closed.');
     } catch {

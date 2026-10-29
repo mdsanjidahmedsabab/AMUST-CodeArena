@@ -203,8 +203,208 @@ async function runTests() {
   assert.equal(logoutRes.status, 200, 'Logout should return HTTP 200');
   console.log('   ✓ Logout completed and refresh cookie invalidated');
 
-  // Cleanup test user
-  await prisma.user.delete({ where: { email: testStudentEmail } }).catch(() => {});
+  // ── 9. Email OTP Registration Initiation ───────────────────────────────────
+  console.log('\n9. Testing Registration OTP Initiation (POST /api/auth/register-init):');
+  const otpUserEmail = `otptest_${timestamp}@amust.ac.bd`;
+  const otpUnivId = `U-${(timestamp + 1).toString().slice(-6)}`;
+
+  const regInitRes = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'OTP Verified Student',
+      email: otpUserEmail,
+      universityId: otpUnivId,
+      password: testPassword,
+      role: 'STUDENT',
+    }),
+  });
+
+  assert.equal(regInitRes.status, 200, 'register-init should return HTTP 200');
+  const regInitData = await regInitRes.json();
+  assert.equal(regInitData.email, otpUserEmail);
+  assert.ok(regInitData.maskedEmail);
+  assert.equal(regInitData.expiresInSeconds, 300);
+  assert.ok(regInitData.devOtp, 'devOtp must be returned in dev/test mode');
+  assert.equal(regInitData.devOtp.length, 6, 'OTP must be 6 digits');
+  console.log(`   ✓ Registration OTP initiated (Email: ${regInitData.maskedEmail}, Code: ${regInitData.devOtp})`);
+
+  // ── 10. OTP Verification with Invalid Code (Attempt Counter) ───────────────
+  console.log('\n10. Testing Incorrect OTP Handling & Attempt Counter:');
+  const wrongOtpRes = await fetch(`${baseUrl}/register-verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: otpUserEmail,
+      otp: '000000',
+    }),
+  });
+
+  assert.equal(wrongOtpRes.status, 400, 'Invalid OTP should return HTTP 400');
+  const wrongOtpData = await wrongOtpRes.json();
+  assert.equal(wrongOtpData.attemptsRemaining, 4, 'Should have 4 attempts remaining');
+  assert.ok(wrongOtpData.error.includes('Incorrect verification code'));
+  console.log('   ✓ Incorrect OTP rejected with decremented attempts counter (4 remaining)');
+
+  // ── 11. OTP Brute-Force Lockout (5 Incorrect Attempts) ─────────────────────
+  console.log('\n11. Testing Brute-Force Lockout Invalidation (5 failed attempts):');
+  // Attempt 2, 3, 4
+  for (let attempt = 3; attempt >= 1; attempt--) {
+    const res = await fetch(`${baseUrl}/register-verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: otpUserEmail, otp: '111111' }),
+    });
+    assert.equal(res.status, 400);
+  }
+
+  // 5th failed attempt -> locks out & invalidates code
+  const finalFailRes = await fetch(`${baseUrl}/register-verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: otpUserEmail, otp: '222222' }),
+  });
+  assert.equal(finalFailRes.status, 400);
+  const finalFailData = await finalFailRes.json();
+  assert.equal(finalFailData.attemptsRemaining, 0);
+  assert.ok(finalFailData.error.includes('Maximum') || finalFailData.error.includes('invalidated'));
+  console.log('   ✓ Brute-force lockout triggered: OTP strictly invalidated after 5 failed attempts');
+
+  // ── 12. OTP Generation Rate Limiting (Max 3 per 10 minutes) ────────────────
+  console.log('\n12. Testing Rate Limiting (Max 3 OTP requests per 10 minutes):');
+  const rateLimitEmail = `ratelimit_${timestamp}@amust.ac.bd`;
+  const ratePayload = {
+    name: 'Rate Limit User',
+    email: rateLimitEmail,
+    password: testPassword,
+    role: 'STUDENT',
+  };
+
+  // Request 1
+  const r1 = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ratePayload),
+  });
+  assert.equal(r1.status, 200, 'Request 1 should succeed');
+
+  // Request 2
+  const r2 = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ratePayload),
+  });
+  assert.equal(r2.status, 200, 'Request 2 should succeed');
+
+  // Request 3
+  const r3 = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ratePayload),
+  });
+  assert.equal(r3.status, 200, 'Request 3 should succeed');
+
+  // Request 4 -> Must be rate limited with HTTP 429
+  const r4 = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ratePayload),
+  });
+  assert.equal(r4.status, 429, '4th request must return HTTP 429 Too Many Requests');
+  const r4Data = await r4.json();
+  assert.ok(r4Data.error.includes('Too many OTP requests'));
+  console.log('   ✓ Rate limit enforced strictly: 4th request within 10 minutes returned HTTP 429');
+
+  // ── 13. Successful User Registration via Verified OTP ───────────────────────
+  console.log('\n13. Testing Complete Registration with Valid OTP:');
+  const verifiedEmail = `verified_${timestamp}@amust.ac.bd`;
+  const verifiedUnivId = `U-${(timestamp + 2).toString().slice(-6)}`;
+
+  const vInitRes = await fetch(`${baseUrl}/register-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Fully Verified Student',
+      email: verifiedEmail,
+      universityId: verifiedUnivId,
+      password: testPassword,
+      role: 'STUDENT',
+    }),
+  });
+
+  assert.equal(vInitRes.status, 200);
+  const vInitData = await vInitRes.json();
+  const validOtp = vInitData.devOtp;
+
+  const vVerifyRes = await fetch(`${baseUrl}/register-verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: verifiedEmail,
+      otp: validOtp,
+    }),
+  });
+
+  assert.equal(vVerifyRes.status, 201, 'Valid OTP registration must return HTTP 201');
+  const vVerifyData = await vVerifyRes.json();
+  assert.ok(vVerifyData.accessToken, 'Access token must be returned');
+  assert.equal(vVerifyData.user.email, verifiedEmail);
+  assert.equal(vVerifyData.user.universityId, verifiedUnivId);
+
+  // Verify user is in DB
+  const dbUser = await prisma.user.findUnique({ where: { email: verifiedEmail } });
+  assert.ok(dbUser, 'User record must exist in PostgreSQL');
+  assert.equal(dbUser.universityId, verifiedUnivId);
+  console.log(`   ✓ Registration verified: User created in DB (ID: ${dbUser.id}, Email: ${dbUser.email})`);
+
+  // ── 14. Two-Factor / Passwordless Login via OTP ────────────────────────────
+  console.log('\n14. Testing Email OTP Login (POST /login-otp-init & /login-otp-verify):');
+
+  // Step 1: Request Login OTP
+  const loginOtpInitRes = await fetch(`${baseUrl}/login-otp-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      identifier: verifiedUnivId, // test student ID lookup
+    }),
+  });
+
+  assert.equal(loginOtpInitRes.status, 200, 'login-otp-init should return HTTP 200');
+  const loginOtpInitData = await loginOtpInitRes.json();
+  assert.equal(loginOtpInitData.email, verifiedEmail);
+  const loginDevOtp = loginOtpInitData.devOtp;
+
+  // Step 2: Verify Login OTP
+  const loginOtpVerifyRes = await fetch(`${baseUrl}/login-otp-verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: verifiedEmail,
+      otp: loginDevOtp,
+    }),
+  });
+
+  assert.equal(loginOtpVerifyRes.status, 200, 'login-otp-verify should return HTTP 200');
+  const loginOtpVerifyData = await loginOtpVerifyRes.json();
+  assert.ok(loginOtpVerifyData.accessToken, 'Must issue access token');
+  assert.equal(loginOtpVerifyData.user.email, verifiedEmail);
+  console.log(`   ✓ Email OTP login verified: Access token issued for ${loginOtpVerifyData.user.email}`);
+
+  // Test authenticated /me endpoint with OTP login token
+  const otpMeRes = await fetch(`${baseUrl}/me`, {
+    headers: { Authorization: `Bearer ${loginOtpVerifyData.accessToken}` },
+  });
+  assert.equal(otpMeRes.status, 200);
+  const otpMeData = await otpMeRes.json();
+  assert.equal(otpMeData.user.id, dbUser.id);
+  console.log('   ✓ Profile retrieval via OTP session verified successfully');
+
+  // Cleanup test users
+  await prisma.user.deleteMany({
+    where: {
+      email: { in: [testStudentEmail, otpUserEmail, rateLimitEmail, verifiedEmail] },
+    },
+  }).catch(() => {});
 
   console.log('\n🎉 ALL AUTHENTICATION & RBAC TESTS PASSED 100%!');
 }

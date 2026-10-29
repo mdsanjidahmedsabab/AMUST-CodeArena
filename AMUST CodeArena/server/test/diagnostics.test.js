@@ -9,6 +9,7 @@ import 'dotenv/config';
 import assert from 'node:assert/strict';
 import prisma from '../src/config/db.js';
 import { signAccessToken } from '../src/services/auth.service.js';
+import { seedContests } from '../seeds/seed_test_contests.js';
 import {
   getStudentDiagnostics,
   getContestAnalytics,
@@ -19,6 +20,9 @@ const baseUrl = 'http://localhost:5000/api/analytics';
 
 async function runTests() {
   console.log('🧪 Starting Milestone 5 Analytics & Diagnostics Tests...\n');
+
+  // Ensure test contest and participants exist idempotently
+  await seedContests();
 
   // Setup test users & contest
   const student = await prisma.user.findFirst({

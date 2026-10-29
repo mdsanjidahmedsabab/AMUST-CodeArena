@@ -10,6 +10,11 @@ import {
   findUserByIdentifier,
   safeUser,
 } from '../services/auth.service.js';
+import {
+  generateAndSendOtp,
+  verifyOtp,
+  maskEmail,
+} from '../services/otpService.js';
 import { authenticate } from '../middleware/auth.js';
 import prisma from '../config/db.js';
 
@@ -18,7 +23,7 @@ const router = Router();
 // ── Strict rate limiter for auth routes (brute-force protection) ──
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,
+  max: process.env.NODE_ENV === 'production' ? 20 : 300,
   message: { error: 'Too many attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -46,14 +51,275 @@ const registerSchema = z.object({
   role: z.enum(['STUDENT', 'TEACHER']).default('STUDENT'),
 });
 
+const otpVerifySchema = z.object({
+  email: z.string().email().toLowerCase().trim(),
+  otp: z.string().min(6).max(6).trim(),
+});
+
 const loginSchema = z.object({
   /** Can be an email address or a university student ID */
   identifier: z.string().min(1).trim(),
   password: z.string().min(1),
 });
 
+const loginOtpInitSchema = z.object({
+  identifier: z.string().min(1).trim(),
+  password: z.string().optional(),
+});
+
 // ─────────────────────────────────────────
-// POST /api/auth/register
+// 1. POST /api/auth/register-init (Step 1: Validate & Send Registration OTP)
+// ─────────────────────────────────────────
+router.post('/register-init', authLimiter, async (req, res, next) => {
+  try {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const { name, email, universityId, password, role } = parsed.data;
+
+    // Check uniqueness — email and universityId must both be free
+    const conflict = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          ...(universityId ? [{ universityId }] : []),
+        ],
+      },
+    });
+
+    if (conflict) {
+      return res.status(409).json({
+        error: 'Email or University ID is already registered',
+      });
+    }
+
+    // Hash password upfront for storage in the secure OTP pending payload
+    const passwordHash = await hashPassword(password);
+
+    // Generate & send OTP
+    const otpResult = await generateAndSendOtp({
+      email,
+      purpose: 'REGISTRATION',
+      payload: {
+        name,
+        email,
+        universityId,
+        passwordHash,
+        role,
+      },
+    });
+
+    return res.status(200).json({
+      message: 'Verification code sent to your email address.',
+      email,
+      maskedEmail: otpResult.maskedEmail,
+      expiresInSeconds: otpResult.expiresInSeconds,
+      ...(otpResult.devOtp ? { devOtp: otpResult.devOtp } : {}),
+    });
+  } catch (err) {
+    if (err.message?.includes('Too many OTP requests')) {
+      return res.status(429).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────
+// 2. POST /api/auth/register-verify (Step 2: Verify OTP & Create User)
+// ─────────────────────────────────────────
+router.post('/register-verify', authLimiter, async (req, res, next) => {
+  try {
+    const parsed = otpVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid verification request',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const { email, otp } = parsed.data;
+
+    // Verify OTP against Redis / in-memory store
+    const verifyResult = await verifyOtp({
+      email,
+      purpose: 'REGISTRATION',
+      candidateOtp: otp,
+    });
+
+    if (!verifyResult.valid) {
+      return res.status(400).json({
+        error: verifyResult.error,
+        attemptsRemaining: verifyResult.attemptsRemaining,
+      });
+    }
+
+    const { name, universityId, passwordHash, role } = verifyResult.payload;
+
+    // Race-condition guard: check if user was created while OTP was pending
+    const conflict = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          ...(universityId ? [{ universityId }] : []),
+        ],
+      },
+    });
+
+    if (conflict) {
+      return res.status(409).json({
+        error: 'Email or University ID is already registered',
+      });
+    }
+
+    // Persist verified user record in PostgreSQL
+    const user = await prisma.user.create({
+      data: { name, email, universityId, passwordHash, role },
+    });
+
+    // Issue authentication tokens
+    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    const refreshToken = signRefreshToken({ id: user.id });
+
+    const refreshTokenHash = await hashPassword(refreshToken);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshTokenHash },
+    });
+
+    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
+
+    return res.status(201).json({
+      message: 'Email verified and account registered successfully.',
+      accessToken,
+      user: safeUser(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────
+// 3. POST /api/auth/login-otp-init (Step 1: Validate Credentials & Send Login OTP)
+// ─────────────────────────────────────────
+router.post('/login-otp-init', authLimiter, async (req, res, next) => {
+  try {
+    const parsed = loginOtpInitSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid login request',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const { identifier, password } = parsed.data;
+
+    // Lookup user by email OR universityId
+    const user = await findUserByIdentifier(identifier);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // If password provided, verify password hash
+    if (password) {
+      const validPw = await verifyPassword(password, user.passwordHash);
+      if (!validPw) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+    }
+
+    // Generate & send login OTP
+    const otpResult = await generateAndSendOtp({
+      email: user.email,
+      purpose: 'LOGIN',
+      payload: { userId: user.id },
+    });
+
+    return res.status(200).json({
+      message: `Login verification code sent to ${maskEmail(user.email)}.`,
+      email: user.email,
+      maskedEmail: otpResult.maskedEmail,
+      expiresInSeconds: otpResult.expiresInSeconds,
+      ...(otpResult.devOtp ? { devOtp: otpResult.devOtp } : {}),
+    });
+  } catch (err) {
+    if (err.message?.includes('Too many OTP requests')) {
+      return res.status(429).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────
+// 4. POST /api/auth/login-otp-verify (Step 2: Verify Login OTP & Issue Session)
+// ─────────────────────────────────────────
+router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
+  try {
+    const parsed = otpVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid verification request',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const { email, otp } = parsed.data;
+
+    const verifyResult = await verifyOtp({
+      email,
+      purpose: 'LOGIN',
+      candidateOtp: otp,
+    });
+
+    if (!verifyResult.valid) {
+      return res.status(400).json({
+        error: verifyResult.error,
+        attemptsRemaining: verifyResult.attemptsRemaining,
+      });
+    }
+
+    const userId = verifyResult.payload?.userId;
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(userId ? [{ id: userId }] : []),
+          { email },
+        ],
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    // Issue authentication tokens
+    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    const refreshToken = signRefreshToken({ id: user.id });
+
+    const refreshTokenHash = await hashPassword(refreshToken);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshTokenHash },
+    });
+
+    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
+
+    return res.status(200).json({
+      message: 'Login verification successful',
+      accessToken,
+      user: safeUser(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─────────────────────────────────────────
+// POST /api/auth/register (Standard Direct Registration)
 // ─────────────────────────────────────────
 router.post('/register', authLimiter, async (req, res, next) => {
   try {
@@ -97,7 +363,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/login
+// POST /api/auth/login (Standard Direct Login)
 // ─────────────────────────────────────────
 router.post('/login', authLimiter, async (req, res, next) => {
   try {

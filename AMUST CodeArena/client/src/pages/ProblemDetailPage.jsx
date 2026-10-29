@@ -11,7 +11,7 @@
 import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor';
 import { marked } from 'marked';
 import katex from 'katex';
 import {
@@ -33,6 +33,7 @@ import api from '../api/client';
 import { updateSessionMode } from '../api/ai';
 import { useAuth } from '../contexts/AuthContext';
 import SocraticHintDrawer from '../components/SocraticHintDrawer';
+import SubmissionStatusModal from '../components/SubmissionStatusModal';
 
 const OJ_BADGE = {
   cf: 'bg-blue-900/40 text-blue-300 border border-blue-700/50',
@@ -90,7 +91,7 @@ if __name__ == '__main__':
 `,
   java: `import java.util.Scanner;
 
-public class Main {
+public class Solution {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         // Your solution here
@@ -147,6 +148,11 @@ export default function ProblemDetailPage() {
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
   const [lastExecutionResult, setLastExecutionResult] = useState(null);
   const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+  const [statusModal, setStatusModal] = useState({
+    isOpen: false,
+    submissionId: null,
+    resultData: null,
+  });
 
   const handleToggleMode = async () => {
     const nextMode = user?.sessionMode === 'TRAINING' ? 'PRACTICE' : 'TRAINING';
@@ -215,7 +221,12 @@ export default function ProblemDetailPage() {
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
     setLanguage(newLang);
-    setCode(STARTER_TEMPLATES[newLang] || '');
+    const isStarter = Object.values(STARTER_TEMPLATES).some(
+      (tmpl) => tmpl.trim() === (code || '').trim()
+    );
+    if (!code || isStarter) {
+      setCode(STARTER_TEMPLATES[newLang] || '');
+    }
   };
 
   const copyToClipboard = (text, index) => {
@@ -278,30 +289,44 @@ export default function ProblemDetailPage() {
         sourceCode: code,
       });
 
+      // Launch Real-Time Verdict Modal
+      setStatusModal({
+        isOpen: true,
+        submissionId: data.submissionId,
+        resultData: data,
+      });
+
       setLastExecutionResult({
         status: data.verdict,
         error: data.error,
         compileOutput: data.compileOutput,
       });
 
-      const isAc = data.verdict === 'ACCEPTED';
-      const isCe = data.verdict === 'COMPILATION_ERROR';
-      const isWa = data.verdict === 'WRONG_ANSWER';
-      const isTle = data.verdict === 'TIME_LIMIT';
+      if (data.verdict && data.verdict !== 'PENDING') {
+        const isAc = data.verdict === 'ACCEPTED';
+        const isCe = data.verdict === 'COMPILATION_ERROR';
+        const isWa = data.verdict === 'WRONG_ANSWER';
+        const isTle = data.verdict === 'TIME_LIMIT';
+        const isRte = data.verdict === 'RUNTIME_ERROR';
 
-      setExecutionOutput(
-        `--- Submission Verdict: ${data.verdict} ---\n` +
-        `Runtime: ${data.timeMs || 0}ms | Memory: ${Math.round(((data.memoryKb || 0) / 1024) * 10) / 10} MB\n\n` +
-        (isAc
-          ? '✓ Accepted! Solution successfully passed all testcases.'
-          : isCe
-          ? `✗ Compilation Error:\n\n${data.compileOutput || data.error}`
-          : isWa
-          ? `✗ Wrong Answer:\n${data.error || 'Output did not match expected testcase output.'}`
-          : isTle
-          ? '✗ Time Limit Exceeded: Process execution took longer than the time limit.'
-          : `Verdict: ${data.verdict}\n${data.error || ''}`)
-      );
+        setExecutionOutput(
+          `--- Submission Verdict: ${data.verdictShort || data.verdict} ---\n` +
+          `Runtime: ${data.timeMs || 0}ms | Memory: ${Math.round(((data.memoryKb || 0) / 1024) * 10) / 10} MB\n\n` +
+          (isAc
+            ? '✓ Accepted! Solution successfully passed all testcases.'
+            : isCe
+            ? `✗ Compilation Error:\n\n${data.compileOutput || data.error}`
+            : isWa
+            ? `✗ Wrong Answer:\n${data.error || 'Output did not match expected testcase output.'}`
+            : isTle
+            ? '✗ Time Limit Exceeded: Process execution took longer than the time limit.'
+            : isRte
+            ? `✗ Runtime Error:\n${data.error || 'Process crashed or returned non-zero exit code.'}`
+            : `Verdict: ${data.verdict}\n${data.error || ''}`)
+        );
+      } else {
+        setExecutionOutput('Submission enqueued successfully. Evaluating against isolated sandbox testcases...');
+      }
     } catch (err) {
       setExecutionOutput(`[Submission Failed]\n${err.response?.data?.error || err.message}`);
     } finally {
@@ -555,76 +580,51 @@ export default function ProblemDetailPage() {
         </div>
 
         {/* ── Right Pane: Code Editor Workspace (50% width) ── */}
-        <div className="w-1/2 flex flex-col bg-gray-900">
-          {/* Editor control bar */}
-          <div className="h-10 bg-gray-900/90 border-b border-gray-800 px-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-blue-400" />
-              <select
-                value={language}
-                onChange={handleLanguageChange}
-                className="bg-gray-800 border border-gray-700 text-xs text-gray-200 rounded px-2.5 py-1 focus:outline-none focus:border-blue-500"
-              >
-                {LANGUAGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Socratic AI Tutor Button */}
-              <button
-                onClick={() => setIsAiDrawerOpen(true)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold border transition-all cursor-pointer ${
-                  user?.sessionMode === 'TRAINING'
-                    ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/90 shadow-md shadow-emerald-950/40'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                }`}
-                title="Ask Socratic AI for guided hints and conceptual inquiry"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Ask Socratic AI</span>
-              </button>
-
-              <button
-                onClick={handleTryRun}
-                disabled={isRunning}
-                className="flex items-center gap-1.5 px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded text-xs font-medium border border-gray-700 transition-colors disabled:opacity-50"
-              >
-                <Play className="w-3.5 h-3.5 text-green-400 fill-green-400" />
-                <span>{isRunning ? 'Running...' : 'Try Run'}</span>
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 px-3.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>{isSubmitting ? 'Submitting...' : 'Submit'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Monaco Editor */}
-          <div className="flex-1 min-h-[300px]">
-            <Editor
-              height="100%"
-              theme="vs-dark"
-              language={LANGUAGE_OPTIONS.find((l) => l.value === language)?.monaco || 'cpp'}
+        <div className="w-1/2 flex flex-col bg-gray-900 overflow-hidden h-full min-h-0">
+          <div className="flex-1 min-h-[400px] h-full flex flex-col overflow-hidden relative">
+            <CodeEditor
               value={code}
               onChange={(val) => setCode(val || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 4,
-                padding: { top: 12, bottom: 12 },
-              }}
+              language={language}
+              onLanguageChange={setLanguage}
+              languageOptions={LANGUAGE_OPTIONS}
+              onRun={handleTryRun}
+              onSubmit={handleSubmit}
+              autoFocus={true}
+              extraHeaderActions={
+                <div className="flex items-center gap-2 ml-2">
+                  {/* Socratic AI Tutor Button */}
+                  <button
+                    onClick={() => setIsAiDrawerOpen(true)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-semibold border transition-all cursor-pointer ${
+                      user?.sessionMode === 'TRAINING'
+                        ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/90 shadow-md shadow-emerald-950/40'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                    }`}
+                    title="Ask Socratic AI for guided hints and conceptual inquiry"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Ask Socratic AI</span>
+                  </button>
+
+                  <button
+                    onClick={handleTryRun}
+                    disabled={isRunning}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded text-xs font-medium border border-gray-700 transition-colors disabled:opacity-50"
+                  >
+                    <Play className="w-3.5 h-3.5 text-green-400 fill-green-400" />
+                    <span>{isRunning ? 'Running...' : 'Try Run'}</span>
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1.5 px-3.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isSubmitting ? 'Submitting...' : 'Submit'}</span>
+                  </button>
+                </div>
+              }
             />
           </div>
 
@@ -663,6 +663,19 @@ export default function ProblemDetailPage() {
                   placeholder="Enter custom test input here..."
                   className="w-full h-full bg-gray-900 border border-gray-800 rounded p-2.5 text-xs font-mono text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
                 />
+              ) : lastExecutionResult?.status === 'COMPILATION_ERROR' ? (
+                <div className="space-y-1.5 h-full flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-semibold text-rose-400">
+                    <span className="flex items-center gap-1.5">
+                      <Terminal className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Compilation Error Diagnostics</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">stderr</span>
+                  </div>
+                  <pre className="flex-1 p-3 rounded-lg bg-slate-950 border border-rose-950/60 font-mono text-xs text-rose-300 overflow-auto whitespace-pre-wrap leading-relaxed shadow-inner">
+                    {lastExecutionResult.compileOutput || lastExecutionResult.stderr || executionOutput}
+                  </pre>
+                </div>
               ) : (
                 <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap">
                   {executionOutput || 'No execution output yet. Click "Try Run" to execute.'}
@@ -682,6 +695,39 @@ export default function ProblemDetailPage() {
         language={language}
         lastExecution={lastExecutionResult}
         isContest={false}
+      />
+
+      {/* Real-Time Submission Status & Diagnostic Feed Modal */}
+      <SubmissionStatusModal
+        isOpen={statusModal.isOpen}
+        onClose={() => setStatusModal((prev) => ({ ...prev, isOpen: false }))}
+        submissionId={statusModal.submissionId}
+        problemTitle={problem?.title}
+        language={language}
+        resultData={statusModal.resultData}
+        onFinalVerdict={({ verdict: v, verdictShort: vs, timeMs: tMs, memoryKb: mKb }) => {
+          setLastExecutionResult({ status: v });
+          const isAc = v === 'ACCEPTED' || vs === 'AC';
+          const isCe = v === 'COMPILATION_ERROR' || vs === 'CE';
+          const isWa = v === 'WRONG_ANSWER' || vs === 'WA';
+          const isTle = v === 'TIME_LIMIT' || vs === 'TLE';
+          const isRte = v === 'RUNTIME_ERROR' || vs === 'RTE';
+          setExecutionOutput(
+            `--- Submission Verdict: ${vs} (${v}) ---\n` +
+            `Runtime: ${tMs || 0}ms | Memory: ${Math.round(((mKb || 0) / 1024) * 10) / 10} MB\n\n` +
+            (isAc
+              ? '✓ Accepted! Solution successfully passed all testcases.'
+              : isCe
+              ? '✗ Compilation Error: Compilation failed. See diagnostic output.'
+              : isWa
+              ? '✗ Wrong Answer: Output did not match expected testcase output.'
+              : isTle
+              ? '✗ Time Limit Exceeded: Process execution took longer than the time limit.'
+              : isRte
+              ? '✗ Runtime Error: Process returned a non-zero exit code or crashed.'
+              : `Verdict: ${v}`)
+          );
+        }}
       />
     </div>
   );

@@ -1,14 +1,15 @@
 /**
  * pages/RegisterPage.jsx
  * ───────────────────────
- * Student self-registration form.
- * Teachers are created by ADMIN — this form only allows STUDENT role.
+ * Student self-registration form with Two-Step Secure Email OTP Verification.
  */
 
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, UserPlus, Mail } from 'lucide-react';
 import ArenaLogo from '../components/ArenaLogo';
+import OtpVerificationModal from '../components/OtpVerificationModal';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
 
 function Field({ label, children }) {
@@ -29,12 +30,24 @@ const inputCls =
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const { setSession } = useAuth();
 
-  const [form, setForm]     = useState({ name: '', email: '', universityId: '', password: '', confirm: '' });
+  const [form, setForm] = useState({ name: '', email: '', universityId: '', password: '', confirm: '' });
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState({});
   const [apiErr, setApiErr] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // OTP Verification Modal State
+  const [otpModal, setOtpModal] = useState({
+    isOpen: false,
+    email: '',
+    maskedEmail: '',
+    devOtp: null,
+    loading: false,
+    error: '',
+    attemptsRemaining: null,
+  });
 
   function set(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -42,13 +55,14 @@ export default function RegisterPage() {
 
   function validate() {
     const e = {};
-    if (form.name.trim().length < 2)    e.name      = 'Name must be at least 2 characters.';
-    if (!/\S+@\S+\.\S+/.test(form.email)) e.email   = 'Enter a valid email address.';
-    if (form.password.length < 8)       e.password   = 'Password must be at least 8 characters.';
-    if (form.password !== form.confirm) e.confirm    = 'Passwords do not match.';
+    if (form.name.trim().length < 2) e.name = 'Name must be at least 2 characters.';
+    if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email address.';
+    if (form.password.length < 8) e.password = 'Password must be at least 8 characters.';
+    if (form.password !== form.confirm) e.confirm = 'Passwords do not match.';
     return e;
   }
 
+  // Step 1: Initiate Registration & Request Email OTP
   async function handleSubmit(e) {
     e.preventDefault();
     setApiErr('');
@@ -58,18 +72,79 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await api.post('/auth/register', {
-        name:         form.name.trim(),
-        email:        form.email.trim().toLowerCase(),
+      const { data } = await api.post('/auth/register-init', {
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
         universityId: form.universityId.trim() || undefined,
-        password:     form.password,
-        role:         'STUDENT',
+        password: form.password,
+        role: 'STUDENT',
       });
-      navigate('/login', { state: { registered: true } });
+
+      // Open OTP Verification Modal
+      setOtpModal({
+        isOpen: true,
+        email: form.email.trim().toLowerCase(),
+        maskedEmail: data.maskedEmail || form.email,
+        devOtp: data.devOtp || null,
+        loading: false,
+        error: '',
+        attemptsRemaining: null,
+      });
     } catch (err) {
-      setApiErr(err.response?.data?.error ?? 'Registration failed. Please try again.');
+      setApiErr(err.response?.data?.error ?? 'Registration initiation failed. Please check your details.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Step 2: Verify Submitted OTP & Finalize Account Registration
+  async function handleVerifyOtp(otp) {
+    setOtpModal((prev) => ({ ...prev, loading: true, error: '' }));
+    try {
+      const { data } = await api.post('/auth/register-verify', {
+        email: otpModal.email,
+        otp,
+      });
+
+      // Establish session in AuthContext
+      if (data.accessToken && data.user) {
+        setSession(data.accessToken, data.user);
+      }
+
+      setOtpModal((prev) => ({ ...prev, isOpen: false, loading: false }));
+      navigate('/dashboard', { replace: true });
+    } catch (err) {
+      const respData = err.response?.data || {};
+      setOtpModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: respData.error || 'Verification failed. Please check the code.',
+        attemptsRemaining: respData.attemptsRemaining,
+      }));
+    }
+  }
+
+  // Resend OTP handler inside modal
+  async function handleResendOtp() {
+    try {
+      const { data } = await api.post('/auth/register-init', {
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
+        universityId: form.universityId.trim() || undefined,
+        password: form.password,
+        role: 'STUDENT',
+      });
+      setOtpModal((prev) => ({
+        ...prev,
+        error: '',
+        devOtp: data.devOtp || null,
+      }));
+      return data.devOtp;
+    } catch (err) {
+      setOtpModal((prev) => ({
+        ...prev,
+        error: err.response?.data?.error || 'Failed to resend code.',
+      }));
     }
   }
 
@@ -85,7 +160,7 @@ export default function RegisterPage() {
           <h1 className="text-2xl font-bold text-white tracking-tight">
             AMUST <span className="bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">CodeArena</span>
           </h1>
-          <p className="text-sm text-gray-400">Create your student account</p>
+          <p className="text-sm text-gray-400">Create your student account with email OTP verification</p>
         </div>
 
         {/* Form */}
@@ -131,29 +206,48 @@ export default function RegisterPage() {
           </Field>
 
           <Field label="Confirm Password">
-            <input type="password" value={form.confirm} onChange={set('confirm')}
-              placeholder="Repeat password" autoComplete="new-password" className={inputCls} />
+            <input type={showPw ? 'text' : 'password'} value={form.confirm}
+              onChange={set('confirm')} placeholder="Repeat your password"
+              autoComplete="new-password" className={inputCls} />
             {errors.confirm && <p className="text-xs text-red-400">{errors.confirm}</p>}
           </Field>
 
-          <button type="submit" disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700
-                       disabled:opacity-50 disabled:cursor-wait text-white font-medium py-2.5
-                       rounded-lg transition-colors text-sm mt-2">
-            {loading
-              ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              : <UserPlus className="w-4 h-4" />}
-            {loading ? 'Creating account…' : 'Create Account'}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500
+                       disabled:opacity-50 text-slate-950 font-bold rounded-lg px-4 py-2.5 text-sm
+                       transition-colors cursor-pointer mt-2"
+          >
+            <Mail className="w-4 h-4" />
+            <span>{loading ? 'Sending Verification Code...' : 'Verify Email & Register'}</span>
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500">
+        {/* Login link */}
+        <p className="text-center text-sm text-gray-400">
           Already have an account?{' '}
-          <Link to="/login" className="text-blue-400 hover:text-blue-300 transition-colors">
+          <Link to="/login" className="text-emerald-400 hover:text-emerald-300 font-semibold transition-colors">
             Sign in
           </Link>
         </p>
+
       </div>
+
+      {/* ── 6-Digit Email OTP Verification Modal ── */}
+      <OtpVerificationModal
+        isOpen={otpModal.isOpen}
+        onClose={() => setOtpModal((prev) => ({ ...prev, isOpen: false }))}
+        email={otpModal.email}
+        maskedEmail={otpModal.maskedEmail}
+        purpose="REGISTRATION"
+        onVerify={handleVerifyOtp}
+        onResend={handleResendOtp}
+        devOtp={otpModal.devOtp}
+        loading={otpModal.loading}
+        error={otpModal.error}
+        attemptsRemaining={otpModal.attemptsRemaining}
+      />
     </div>
   );
 }

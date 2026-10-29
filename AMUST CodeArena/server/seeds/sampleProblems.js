@@ -378,25 +378,25 @@ YES YES`,
     difficulty_tier: 'Easy',
     difficulty_rating: 800,
     topic_tags: 'MATH TWO_POINTERS',
-    statement: `Given an array of integers \`nums\` and an integer \`target\`, return *indices of the two numbers such that they add up to \`target\`*.
+    statement: `Given an array of integers \`nums\` and an integer \`target\`, return the *indices of the two numbers such that they add up to \`target\`*.
 
 You may assume that each input would have ***exactly one solution***, and you may not use the same element twice. You can return the answer in any order.
 
 ### Input Format
-The first line contains the integer array \`nums\`.
-The second line contains the integer \`target\`.
+The first line contains two space-separated integers $N$ and $\\text{target}$ ($2 \\le N \\le 10^4$, $-10^9 \\le \\text{target} \\le 10^9$).
+The second line contains $N$ space-separated integers representing the array \`nums\` ($-10^9 \\le \\text{nums}[i] \\le 10^9$).
 
 ### Output Format
-Output the two 0-based indices as a space-separated pair or array.
+Output the two 0-based indices as space-separated integers (e.g. \`0 1\`).
 
 ### Constraints
-- $2 \\le \\text{nums.length} \\le 10^4$
+- $2 \\le N \\le 10^4$
 - $-10^9 \\le \\text{nums}[i] \\le 10^9$
 - $-10^9 \\le \\text{target} \\le 10^9$
 - Only one valid answer exists.`,
-    sample_input: `[2, 7, 11, 15]
-9`,
-    sample_output: '[0, 1]',
+    sample_input: `4 9
+2 7 11 15`,
+    sample_output: '0 1',
   },
 
   // ── 12. LeetCode 21 ──
