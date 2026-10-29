@@ -1,11 +1,13 @@
 # ── AMUST CodeArena API Server Container ─────────────────────────────────────
 FROM node:20-bookworm-slim
 
-# Install system dependencies including OpenSSL and native build tools
+# Install system dependencies including OpenSSL, g++ compiler, and native tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
     curl \
+    g++ \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
