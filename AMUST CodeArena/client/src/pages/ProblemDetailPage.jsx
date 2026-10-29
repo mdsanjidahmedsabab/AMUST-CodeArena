@@ -580,9 +580,13 @@ export default function ProblemDetailPage() {
         </div>
 
         {/* ── Right Pane: Code Editor Workspace (50% width) ── */}
-        <div className="w-1/2 flex flex-col bg-gray-900 overflow-hidden h-full min-h-0">
-          <div className="flex-1 min-h-[400px] h-full flex flex-col overflow-hidden relative">
+        <div className="w-1/2 flex flex-col bg-gray-900 overflow-hidden h-full min-h-0" style={{ minHeight: '500px' }}>
+          <div
+            className="flex-1 min-h-[500px] h-full w-full flex flex-col overflow-hidden relative"
+            style={{ minHeight: '500px', height: '100%' }}
+          >
             <CodeEditor
+              key={`${id}_${language}`}
               value={code}
               onChange={(val) => setCode(val || '')}
               language={language}

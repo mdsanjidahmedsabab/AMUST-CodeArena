@@ -16,6 +16,7 @@
     "build": "npm -w client run build",
     "test": "node server/test/run_all_tests.js",
     "test:all": "node server/test/run_all_tests.js",
+    "audit:security": "node scripts/verify-security.js",
     "seed": "npm -w server run db:seed",
     "seed:all-problems": "node server/prisma/seed_multiplatform_1500.js",
     "docker:up": "docker compose up -d",

@@ -1,15 +1,15 @@
 /**
  * components/CodeEditor.jsx
  * ─────────────────────────
- * Milestone 9 & Bugfix: Polished Competitive-Programming Monaco Editor Workspace.
+ * Milestone 9 & Critical Fix: Polished Competitive-Programming Monaco Editor Workspace.
  *
  * Implements:
- *   1. Themes: vs-dark (safe default), monokai, dracula, one-dark (persisted in localStorage).
- *   2. Keybindings: Normal (standard cursor), Vim, and Emacs modes with mode indicator.
- *   3. Layout: Explicit non-zero sizing with automatic layout recalculation on mount and resize.
- *   4. Ergonomics: Configurable font size (12px to 22px) and auto-format button.
- *   5. Shortcuts: Ctrl+Enter / Cmd+Enter (Run) and Ctrl+Alt+Enter (Submit).
- *   6. Status Bar: Cursor line/col, active theme, and CP shortcut legend.
+ *   1. Explicit Pixel/VH Height Fallbacks: Guaranteed non-zero container bounds (min-height 500px, height 100%).
+ *   2. Guaranteed Starter Template: C++20 standard template immediately loaded if code state is empty/undefined.
+ *   3. Forced Layout & Focus: Scheduled layout recalculation on mount, window resize, and tab change.
+ *   4. Themes: vs-dark (safe default), monokai, dracula, one-dark.
+ *   5. Keybindings: Normal (standard cursor), Vim, and Emacs modes with mode indicator.
+ *   6. Shortcuts: Ctrl+Enter / Cmd+Enter (Run) and Ctrl+Alt+Enter (Submit).
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -38,17 +38,17 @@ using namespace std;
 int main() {
     ios_base::sync_with_stdio(false);
     cin.tie(NULL);
-
-    // Write your contest solution here
-
+    
+    // Write your solution here
+    
     return 0;
 }
 `,
   c: `#include <stdio.h>
 
 int main() {
-    // Write your contest solution here
-
+    // Write your solution here
+    
     return 0;
 }
 `,
@@ -58,7 +58,7 @@ def solve():
     input_data = sys.stdin.read().split()
     if not input_data:
         return
-    # Write your contest solution here
+    # Write your solution here
 
 if __name__ == '__main__':
     solve()
@@ -68,7 +68,7 @@ if __name__ == '__main__':
 public class Solution {
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
-        // Write your contest solution here
+        // Write your solution here
 
         sc.close();
     }
@@ -80,12 +80,16 @@ function solve() {
     const input = fs.readFileSync(0, 'utf-8').trim().split(/\\s+/);
     if (!input || input.length === 0 || input[0] === '') return;
 
-    // Write your contest solution here
+    // Write your solution here
 }
 
 solve();
 `,
 };
+
+export function getDefaultTemplate(lang) {
+  return DEFAULT_STARTER_TEMPLATES[lang] || DEFAULT_STARTER_TEMPLATES.cpp;
+}
 
 export default function CodeEditor({
   value,
@@ -119,9 +123,9 @@ export default function CodeEditor({
   const [fontSize, setFontSize] = useState(() => {
     try {
       const saved = Number(localStorage.getItem('codearena_font_size'));
-      return saved && FONT_SIZES.includes(saved) ? saved : 13;
+      return saved && FONT_SIZES.includes(saved) ? saved : 14;
     } catch {
-      return 13;
+      return 14;
     }
   });
 
@@ -139,11 +143,12 @@ export default function CodeEditor({
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
-  // ── Code Value Resolution (Always Fallback to Safe Starter Template) ─────────
+  // ── Guaranteed Starter Template on Initial Load ─────────────────────────────
+  // If value is undefined, null, or empty, fallback immediately to language template
   const activeCode =
-    value !== undefined && value !== null
+    typeof value === 'string' && value.trim().length > 0
       ? value
-      : DEFAULT_STARTER_TEMPLATES[language] || DEFAULT_STARTER_TEMPLATES.cpp;
+      : getDefaultTemplate(language);
 
   // ── Handlers & Preference Persistence ──────────────────────────────────────
   const handleThemeChange = (newTheme) => {
@@ -177,7 +182,6 @@ export default function CodeEditor({
   };
 
   const rebindKeys = (mode) => {
-    // 1. Dispose any existing keybindings cleanly
     if (keybindingDisposerRef.current) {
       try {
         keybindingDisposerRef.current();
@@ -187,13 +191,11 @@ export default function CodeEditor({
       keybindingDisposerRef.current = null;
     }
 
-    // 2. Normal mode needs no adapter
     if (!mode || mode === 'normal') {
       setSubModeState('NORMAL');
       return;
     }
 
-    // 3. Attach keybinding adapter inside try/catch
     if (editorRef.current && monacoRef.current) {
       try {
         keybindingDisposerRef.current = attachKeybindings(
@@ -213,7 +215,6 @@ export default function CodeEditor({
     }
   };
 
-  // Format Document Action
   const handleFormatCode = () => {
     if (editorRef.current) {
       try {
@@ -222,7 +223,7 @@ export default function CodeEditor({
     }
   };
 
-  // ── Monaco Initialization & Layout Recalculation ───────────────────────────
+  // ── Monaco Initialization & Forced Layout Recalculation ─────────────────────
   const handleBeforeMount = (monaco) => {
     try {
       registerMonacoThemes(monaco);
@@ -235,7 +236,7 @@ export default function CodeEditor({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    // Apply configured theme safely
+    // Apply configured theme safely with vs-dark fallback
     try {
       const activeTheme = THEME_OPTIONS.some((t) => t.id === theme) ? theme : 'vs-dark';
       monaco.editor.setTheme(activeTheme);
@@ -281,7 +282,7 @@ export default function CodeEditor({
     // Attach initial keybindings safely
     rebindKeys(keybindingMode);
 
-    // Trigger immediate & deferred layout recalculations to ensure non-zero dimensions
+    // Force layout on mount (immediate + delayed ticks)
     try {
       editor.layout();
       if (autoFocus) {
@@ -296,13 +297,13 @@ export default function CodeEditor({
           editor.focus();
         }
       } catch {}
-    }, 50);
+    }, 100);
 
     const timer2 = setTimeout(() => {
       try {
         editor.layout();
       } catch {}
-    }, 250);
+    }, 300);
 
     return () => {
       clearTimeout(timer1);
@@ -320,10 +321,12 @@ export default function CodeEditor({
 
     window.addEventListener('resize', handleResize);
 
-    // Initial delayed tick to handle async parent animation or CSS layout
     const initialTimer = setTimeout(() => {
       try {
         editorRef.current?.layout();
+        if (autoFocus) {
+          editorRef.current?.focus();
+        }
       } catch {}
     }, 100);
 
@@ -336,7 +339,7 @@ export default function CodeEditor({
         } catch {}
       }
     };
-  }, []);
+  }, [autoFocus]);
 
   // Sync layout whenever language changes
   useEffect(() => {
@@ -352,7 +355,10 @@ export default function CodeEditor({
     languageOptions.find((l) => l.value === language)?.monaco || language;
 
   return (
-    <div className="flex flex-col h-full min-h-[400px] flex-1 w-full bg-slate-950/60 relative overflow-hidden select-text">
+    <div
+      className="flex flex-col h-full min-h-[500px] flex-1 w-full bg-slate-950/60 relative overflow-hidden select-text"
+      style={{ minHeight: '500px', height: '100%' }}
+    >
       {/* ── Toolbar Header ─────────────────────────────────────────────────── */}
       <div className="px-3 py-2 border-b border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-2.5 shrink-0 backdrop-blur-md select-none">
         {/* Left: Language & Code Reset */}
@@ -507,39 +513,48 @@ export default function CodeEditor({
         </div>
       )}
 
-      {/* ── Monaco Editor Instance Container (Explicit Non-Zero Bounds) ────── */}
-      <div className="flex-1 min-h-[400px] h-full w-full relative overflow-hidden">
+      {/* ── Monaco Editor Instance Container (Guaranteed Explicit Non-Flex Viewport Bounds) ──── */}
+      <div
+        className="relative w-full overflow-hidden"
+        style={{ height: 'calc(100vh - 280px)', minHeight: '450px' }}
+      >
         <Editor
           height="100%"
           width="100%"
-          theme={theme}
-          language={monacoLang}
+          theme={theme || 'vs-dark'}
+          language={monacoLang || 'cpp'}
           value={activeCode}
-          onChange={(val) => onChange && onChange(val || '')}
+          onChange={(val) => onChange && onChange(val ?? '')}
           beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
           loading={
-            <div className="flex items-center justify-center h-full w-full bg-slate-950 text-slate-400 font-mono text-xs">
+            <div
+              className="flex items-center justify-center h-full w-full bg-slate-950 text-slate-400 font-mono text-xs"
+              style={{ height: 'calc(100vh - 280px)', minHeight: '450px' }}
+            >
               <div className="w-5 h-5 border-2 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin mr-2" />
               Loading Code Editor...
             </div>
           }
           options={{
             readOnly,
-            fontSize,
+            fontSize: fontSize || 14,
             fontFamily: `'JetBrains Mono', 'Fira Code', Consolas, monospace`,
             fontLigatures: true,
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             padding: { top: 12 },
             lineNumbers: 'on',
+            glyphMargin: false,
+            folding: true,
+            lineDecorationsWidth: 10,
+            lineNumbersMinChars: 3,
             tabSize: 4,
             renderLineHighlight: 'line',
             automaticLayout: true,
             cursorBlinking: 'smooth',
             bracketPairColorization: { enabled: true },
             fixedOverflowWidgets: true,
-            glyphMargin: false,
           }}
         />
       </div>

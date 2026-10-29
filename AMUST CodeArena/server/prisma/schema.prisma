@@ -125,6 +125,8 @@ model Problem {
   directUrl        String?       @map("direct_url")
   difficulty       Difficulty
   rating           Int           @default(800)
+  timeLimit        Int           @default(1000) @map("time_limit")
+  memoryLimit      Int           @default(256) @map("memory_limit")
   statementCache   String?       @map("statement_cache") @db.Text
   sampleTestcases  Json?         @map("sample_testcases")
   cachedAt         DateTime?     @map("cached_at")

@@ -60,17 +60,17 @@ using namespace std;
 int main() {
     ios_base::sync_with_stdio(false);
     cin.tie(NULL);
-
-    // Write your contest solution here
-
+    
+    // Write your solution here
+    
     return 0;
 }
 `,
   c: `#include <stdio.h>
 
 int main() {
-    // Write your contest solution here
-
+    // Write your solution here
+    
     return 0;
 }
 `,
@@ -137,9 +137,20 @@ export default function ContestArenaPage() {
   // ── Selected Problem Index ──────────────────────────────────────────────────
   const [selectedProblemIndex, setSelectedProblemIndex] = useState(0);
 
-  // ── Code Editor State (keyed by problem label) ──────────────────────────────
+  // ── Code Editor State (keyed by problem label and language) ────────────────
   const [language, setLanguage] = useState('cpp');
-  const [codeMap, setCodeMap] = useState({});
+  const [codeMap, setCodeMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`codearena_contest_${slug}_codemap`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch {}
+    return {};
+  });
   const [customInput, setCustomInput] = useState('');
   const [bottomTab, setBottomTab] = useState('input'); // 'input' | 'output' | 'submissions'
   const [executionOutput, setExecutionOutput] = useState('');
@@ -246,15 +257,26 @@ export default function ContestArenaPage() {
     if (!currentProblem) return defaultTemplate;
     const key = `${currentProblem.label}_${language}`;
     const saved = codeMap[key];
-    return saved !== undefined && saved !== null ? saved : defaultTemplate;
+    if (typeof saved === 'string' && saved.trim().length > 0) {
+      return saved;
+    }
+    return defaultTemplate;
   }, [codeMap, currentProblem, language]);
 
   const handleCodeChange = (newCode) => {
-    if (!currentProblem) return;
-    setCodeMap((prev) => ({
-      ...prev,
-      [`${currentProblem.label}_${language}`]: newCode,
-    }));
+    const activeLabel = currentProblem?.label || 'A';
+    const key = `${activeLabel}_${language}`;
+    const codeVal = newCode ?? '';
+    setCodeMap((prev) => {
+      const next = {
+        ...prev,
+        [key]: codeVal,
+      };
+      try {
+        localStorage.setItem(`codearena_contest_${slug}_codemap`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   // ── Milestone 6: Live Contest Anti-Cheat Proctoring ──────────────────────────
@@ -901,11 +923,16 @@ export default function ContestArenaPage() {
           className="flex flex-col h-full bg-slate-950/40 flex-1 lg:flex-none overflow-hidden select-text min-h-0"
           style={{
             width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${100 - splitPercent}%` : '100%',
+            minHeight: '500px',
           }}
         >
           {/* Polished Monaco CodeEditor Component with Explicit Dimensions */}
-          <div className="flex-1 min-h-[400px] h-full flex flex-col overflow-hidden relative">
+          <div
+            className="flex-1 w-full flex flex-col relative"
+            style={{ minHeight: '450px' }}
+          >
             <CodeEditor
+              key={`${currentProblem?.label || 'A'}_${language}`}
               value={currentCode}
               onChange={handleCodeChange}
               language={language}

@@ -321,6 +321,9 @@ The platform includes end-to-end automated test suites verifying every milestone
 ```bash
 # Run the master automated audit suite across all milestones
 npm test
+
+# Run pre-public GitHub security audit & sanitization scan
+npm run audit:security
 ```
 *(Or run `scripts\test-all.bat` on Windows / `./scripts/test-all.sh` on Linux)*
 

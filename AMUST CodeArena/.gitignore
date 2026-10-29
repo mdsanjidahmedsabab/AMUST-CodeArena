@@ -1,14 +1,45 @@
+# ── AMUST CodeArena — Root Git Ignore Configuration ─────────────────────────
+
+# Dependencies
 node_modules/
 **/node_modules/
+
+# Environment files & Secrets (Strictly Exclude Real Credentials)
 .env
 .env.*
+*.env
 !.env.example
 **/remote_accounts.json
 **/*credentials*.json
 **/*secret*.json
+
+# Build & Bundler Artifacts
 dist/
 build/
+.vite/
+client/dist/
+
+# Database dumps & local sqlite databases
+*.dump
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs & Temporary Debug Files
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Binaries & Compiled Executables
 tools/
 server/tools/
 *.exe
+*.o
+*.obj
+*.out
+
+# Operating System Caches
+.DS_Store
+Thumbs.db

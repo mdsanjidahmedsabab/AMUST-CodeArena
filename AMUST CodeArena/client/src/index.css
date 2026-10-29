@@ -86,3 +86,20 @@
   overflow-y: hidden;
   padding: 0.5rem 0;
 }
+
+/* ── Monaco Editor Canvas & Layout Sizing Overrides ── */
+.monaco-editor,
+.monaco-editor .overflow-guard {
+  height: 100% !important;
+  width: 100% !important;
+  min-height: 400px !important;
+}
+
+.monaco-editor .view-lines {
+  cursor: text !important;
+}
+
+.monaco-editor .margin,
+.monaco-editor .monaco-scrollable-element {
+  min-height: 400px !important;
+}
