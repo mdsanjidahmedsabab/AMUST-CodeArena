@@ -12,8 +12,10 @@ import prisma from '../src/config/db.js';
 import authRoutes from '../src/routes/auth.js';
 import { requireRole } from '../src/middleware/rbac.js';
 import { sendOtpEmail } from '../src/services/otpService.js';
+import { hashPassword } from '../src/services/auth.service.js';
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(cookieParser());
 app.use('/api/auth', authRoutes);
@@ -37,6 +39,21 @@ async function runPortalTests() {
   const password = 'password123';
 
   try {
+    // Seed test users
+    const studentPw = await hashPassword(password);
+    await prisma.user.upsert({
+      where: { email: studentEmail },
+      update: { passwordHash: studentPw, role: 'STUDENT', isVerified: true },
+      create: { email: studentEmail, name: 'Student 1', passwordHash: studentPw, role: 'STUDENT', isVerified: true },
+    });
+
+    const teacherPw = await hashPassword(password);
+    await prisma.user.upsert({
+      where: { email: teacherEmail },
+      update: { passwordHash: teacherPw, role: 'TEACHER', isVerified: true },
+      create: { email: teacherEmail, name: 'Faculty Member', passwordHash: teacherPw, role: 'TEACHER', isVerified: true },
+    });
+
     // ── 1. Student Portal Login with Matching Role ──────────────────────────────
     console.log('1. Testing Student Portal Login (expectedRole: STUDENT):');
     const studentLoginRes = await fetch(`${baseUrl}/login`, {
@@ -127,7 +144,7 @@ async function runPortalTests() {
     assert.equal(otpCorrectRoleRes.status, 200, 'OTP request on matching portal must succeed');
     console.log('   ✓ OTP request on matching portal accepted (HTTP 200)');
 
-    // ── 6. Teacher Account Registration with Role & isVerified ──────────────────
+    // ── 6. Teacher Account Registration via Email OTP ───────────────────────────
     console.log('\n6. Testing Faculty / Teacher Registration via Email OTP:');
     const timestamp = Date.now();
     const newTeacherEmail = `teacher_reg_${timestamp}@amust.ac.bd`;
@@ -162,7 +179,7 @@ async function runPortalTests() {
     assert.equal(regVerifyData.user.isVerified, true);
     console.log('   ✓ Teacher registered with role TEACHER and isVerified: true');
 
-    // ── 7. Student Account Registration with Role & isVerified ──────────────────
+    // ── 7. Student Account Registration via Email OTP ───────────────────────────
     console.log('\n7. Testing Student Registration via Email OTP:');
     const newStudentEmail = `student_reg_${timestamp}@amust.ac.bd`;
     const newStudentId = `STU-${timestamp.toString().slice(-5)}`;
@@ -203,7 +220,7 @@ async function runPortalTests() {
     assert.equal(rbacData.access, 'TEACHER');
     console.log('   ✓ requireRole(["TEACHER"]) correctly verified flatRoles compatibility');
 
-    // ── 9. Anti-Spam Email Deliverability Properties ───────────────────────────
+    // ── 9. Anti-Spam Email Deliverability Template ───────────────────────────
     console.log('\n9. Testing Anti-Spam Email Deliverability Template:');
     const mockEmailResult = await sendOtpEmail({
       to: 'inbox-audit@amust.ac.bd',
@@ -214,10 +231,10 @@ async function runPortalTests() {
     assert.equal(mockEmailResult.otp, '789012');
     console.log('   ✓ Transactional email dispatch parameters verified');
 
-    // Clean up created test accounts
+    // Clean up all created test accounts so the DB remains clean
     await prisma.user.deleteMany({
       where: {
-        email: { in: [newTeacherEmail, newStudentEmail] },
+        email: { in: [studentEmail, teacherEmail, newTeacherEmail, newStudentEmail] },
       },
     });
 

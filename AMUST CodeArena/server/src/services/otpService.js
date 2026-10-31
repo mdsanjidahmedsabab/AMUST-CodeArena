@@ -91,6 +91,9 @@ function getMailTransporter() {
       pool: true,
       maxConnections: 5,
       maxMessages: 100,
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 8000,
       tls: {
         rejectUnauthorized: process.env.NODE_ENV === 'production',
       },
@@ -324,7 +327,12 @@ export async function generateAndSendOtp({ email, purpose, payload = {} }) {
   }
 
   // 4. Dispatch Email or Log to Console
-  await sendOtpEmail({ to: normEmail, otp, purpose });
+  // 4. Dispatch Email or Log to Console (Non-blocking queue/background dispatch)
+  setImmediate(() => {
+    sendOtpEmail({ to: normEmail, otp, purpose }).catch((err) => {
+      console.warn('   ⚠️ [OTP Background Dispatch Warning]:', err.message);
+    });
+  });
 
   const result = {
     success: true,

@@ -20,6 +20,10 @@ process.on('unhandledRejection', (reason, promise) => {
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
+// ── Reverse Proxy Trust Configuration (Render, Heroku, Cloudflare) ──
+// Enables accurate client IP detection and prevents express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set('trust proxy', 1);
+
 // ── Check database connection on startup ──
 prisma
   .$connect()
@@ -66,6 +70,9 @@ app.use(
     max: 500,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: {
+      xForwardedForHeader: false,
+    },
   })
 );
 

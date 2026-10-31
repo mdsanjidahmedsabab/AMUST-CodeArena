@@ -33,6 +33,7 @@ export const socraticHintLimiter = rateLimit({
   max: MAX_HINT_QUOTA,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
   keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
   handler: (_req, res) => {
     return res.status(429).json({

@@ -27,6 +27,9 @@ const authLimiter = rateLimit({
   message: { error: 'Too many attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  validate: {
+    xForwardedForHeader: false,
+  },
 });
 
 // ── HttpOnly cookie options for refresh token ──
@@ -124,7 +127,8 @@ router.post('/register-init', authLimiter, async (req, res, next) => {
     });
 
     return res.status(200).json({
-      message: 'Verification code sent to your email address.',
+      success: true,
+      message: 'OTP sent successfully',
       email,
       maskedEmail: otpResult.maskedEmail,
       expiresInSeconds: otpResult.expiresInSeconds,
@@ -282,7 +286,8 @@ router.post('/login-otp-init', authLimiter, async (req, res, next) => {
     });
 
     return res.status(200).json({
-      message: `Login verification code sent to ${maskEmail(user.email)}.`,
+      success: true,
+      message: 'OTP sent successfully',
       email: user.email,
       maskedEmail: otpResult.maskedEmail,
       expiresInSeconds: otpResult.expiresInSeconds,
