@@ -2,23 +2,19 @@ import dotenv from 'dotenv';
 dotenv.config({ path: 'server/.env' });
 dotenv.config();
 import assert from 'node:assert/strict';
-import nodemailer from 'nodemailer';
-import { sendOtpEmail, getMailTransporter } from '../src/services/otpService.js';
+import { getMailTransporter, sendEmail } from '../src/services/mailer.service.js';
+import { sendOtpEmail } from '../src/services/otpService.js';
 
 async function testSmtpConfiguration() {
-  console.log('\n--- Testing Nodemailer Transporter SSL Configuration ---');
+  console.log('\n--- Testing Nodemailer Transporter Gmail Preset Configuration ---');
 
   const transporter = getMailTransporter();
   assert.ok(transporter, 'Transporter should be instantiated');
 
   // Verify options
-  assert.equal(transporter.options.port, 465, 'Transporter port must be 465');
-  assert.equal(transporter.options.secure, true, 'Transporter secure must be true for SSL');
-  assert.equal(transporter.options.connectionTimeout, 15000, 'connectionTimeout must be 15000');
-  assert.equal(transporter.options.greetingTimeout, 10000, 'greetingTimeout must be 10000');
-  assert.equal(transporter.options.socketTimeout, 15000, 'socketTimeout must be 15000');
+  assert.equal(transporter.options.service, 'gmail', 'Transporter service must be "gmail"');
   assert.equal(transporter.options.tls.rejectUnauthorized, false, 'tls.rejectUnauthorized must be false');
-  console.log('✓ Transporter options match SSL specifications.');
+  console.log('✓ Transporter options match Gmail service preset specifications.');
 
   console.log('\n--- Testing Error Throwing on SMTP Failure ---');
   // Temporarily replace transporter sendMail with a simulated failure
@@ -29,7 +25,23 @@ async function testSmtpConfiguration() {
     throw error;
   };
 
-  let threw = false;
+  // 1. Direct mailer.service.js sendEmail test
+  let mailerThrew = false;
+  try {
+    await sendEmail({
+      to: 'fail-mailer@amust.ac.bd',
+      subject: 'Test Failure',
+      text: 'Test Failure Message',
+    });
+  } catch (err) {
+    mailerThrew = true;
+    assert.match(err.message, /Could not send email via SMTP \(Connection timeout\)/);
+    console.log(`✓ sendEmail correctly rejected with error: "${err.message}"`);
+  }
+  assert.ok(mailerThrew, 'sendEmail MUST throw/reject when SMTP fails');
+
+  // 2. otpService.js sendOtpEmail test
+  let otpThrew = false;
   try {
     await sendOtpEmail({
       to: 'fail-test@amust.ac.bd',
@@ -37,15 +49,15 @@ async function testSmtpConfiguration() {
       purpose: 'REGISTRATION',
     });
   } catch (err) {
-    threw = true;
+    otpThrew = true;
     assert.match(err.message, /Could not send email via SMTP \(Connection timeout\)/);
     console.log(`✓ sendOtpEmail correctly threw expected error: "${err.message}"`);
   } finally {
     transporter.sendMail = originalSendMail;
   }
 
-  assert.ok(threw, 'sendOtpEmail MUST throw when SMTP dispatch fails');
-  console.log('\n🎉 Transporter SSL & Error Throwing verification passed!\n');
+  assert.ok(otpThrew, 'sendOtpEmail MUST throw when SMTP dispatch fails');
+  console.log('\n🎉 Mailer Module & Error Rejection verification passed!\n');
   process.exit(0);
 }
 

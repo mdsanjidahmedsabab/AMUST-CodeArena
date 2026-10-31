@@ -22,6 +22,9 @@
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { getRedisClient } from '../config/redis.js';
+import { getMailTransporter, sendEmail } from './mailer.service.js';
+
+export { getMailTransporter, sendEmail };
 
 const OTP_TTL_SECONDS = 300; // 5 minutes
 const OTP_RATE_LIMIT_SECONDS = 600; // 10 minutes
@@ -78,38 +81,6 @@ export function maskEmail(email) {
   const [user, domain] = email.split('@');
   if (user.length <= 2) return `${user[0]}*@${domain}`;
   return `${user[0]}${'*'.repeat(Math.max(1, user.length - 2))}${user[user.length - 1]}@${domain}`;
-}
-
-// ── Email Transporter Setup ──────────────────────────────────────────────────
-let mailTransporter = null;
-
-export function getMailTransporter() {
-  if (mailTransporter) return mailTransporter;
-
-  const user = process.env.SMTP_USER || process.env.EMAIL_USER;
-  const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT) || 465;
-  const secure = (Number(process.env.SMTP_PORT) || 465) === 465;
-
-  if (host && user && pass) {
-    mailTransporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: {
-        user,
-        pass,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeout: 15000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
-  }
-  return mailTransporter;
 }
 
 /**
@@ -244,45 +215,19 @@ export async function sendOtpEmail({ to, otp, purpose }) {
 </body>
 </html>`;
 
-  // Dispatch real email if SMTP transporter is configured
-  if (transporter) {
-    try {
-      const info = await transporter.sendMail({
-        from: fromAddr,
-        to,
-        replyTo: process.env.SMTP_REPLY_TO || fromAddr,
-        subject,
-        text: textContent,
-        html: htmlContent,
-        headers: {
-          'X-Priority': '1',
-          'X-MSMail-Priority': 'High',
-          'Importance': 'high',
-          'Auto-Submitted': 'auto-generated',
-          'X-Auto-Response-Suppress': 'OOF, AutoReply',
-          'X-Entity-Ref-ID': `${purpose}-${Date.now()}`,
-        },
-      });
-      console.log(`   ✅ [SMTP Dispatch Success]: Real OTP delivered to ${to} (Message ID: ${info?.messageId || 'sent'})`);
-      return { success: true, otp, messageId: info?.messageId };
-    } catch (err) {
-      console.error(`   ❌ [SMTP Dispatch Error]: Failed to deliver email to ${to} via SMTP: ${err.message}`, {
-        code: err.code,
-        command: err.command,
-        response: err.response,
-      });
-      throw new Error(`Could not send email via SMTP (${err.message})`);
-    }
-  } else {
-    const errorMsg = 'SMTP transporter is not configured: Missing SMTP_USER or SMTP_PASS';
-    if (process.env.NODE_ENV === 'production') {
-      console.error(`   ❌ [SMTP Configuration Error]: ${errorMsg}`);
-      throw new Error(errorMsg);
-    }
-    console.warn(`   ⚠️ [SMTP Dispatch Notice]: ${errorMsg}. Local dev OTP logged above.`);
-  }
+  // Dispatch real email via mailer service
+  const mailResult = await sendEmail({
+    to,
+    from: fromAddr,
+    subject,
+    text: textContent,
+    html: htmlContent,
+    headers: {
+      'X-Entity-Ref-ID': `${purpose}-${Date.now()}`,
+    },
+  });
 
-  return { success: true, otp };
+  return { success: true, otp, messageId: mailResult?.messageId };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
