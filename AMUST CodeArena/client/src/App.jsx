@@ -7,6 +7,7 @@
  *   <ProtectedRoute>                     — requires any authenticated user
  *   <ProtectedRoute allowedRoles={['STUDENT']}> — student portal only (teachers redirected to /teacher/dashboard)
  *   <ProtectedRoute allowedRoles={['TEACHER']}> — teacher portal only (students redirected to /dashboard)
+ *   Super Admin (sababsanjid2@gmail.com / ADMIN / isSuperAdmin) bypasses all role restrictions.
  */
 
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
@@ -45,7 +46,7 @@ const queryClient = new QueryClient({
  *   - Checks allowedRoles / role:
  *     - If user is TEACHER attempting to access a student-only route -> redirect to /teacher/dashboard
  *     - If user is STUDENT attempting to access a teacher-only route -> redirect to /dashboard
- *     - ADMIN is allowed on all routes
+ *     - Super Admin (sababsanjid2@gmail.com / isSuperAdmin / ADMIN) is allowed on ALL routes.
  */
 function ProtectedRoute({ allowedRoles, role }) {
   const { user, isLoading } = useAuth();
@@ -63,11 +64,17 @@ function ProtectedRoute({ allowedRoles, role }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  const isSuper = Boolean(
+    user.isSuperAdmin ||
+    user.role === 'ADMIN' ||
+    user.email?.toLowerCase() === 'sababsanjid2@gmail.com'
+  );
+
   const roles = allowedRoles
     ? (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles])
     : (role ? [role] : null);
 
-  if (roles && !roles.includes(user.role) && user.role !== 'ADMIN') {
+  if (roles && !roles.includes(user.role) && !isSuper) {
     if (user.role === 'TEACHER') {
       return <Navigate to="/teacher/dashboard" replace />;
     }

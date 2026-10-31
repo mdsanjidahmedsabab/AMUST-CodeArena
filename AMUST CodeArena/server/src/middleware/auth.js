@@ -23,7 +23,10 @@ export function authenticate(req, res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload; // { id, role, iat, exp }
+    req.user = payload; // { id, role, email, isSuperAdmin, iat, exp }
+    if (req.user.email?.toLowerCase() === 'sababsanjid2@gmail.com' || req.user.role === 'ADMIN') {
+      req.user.isSuperAdmin = true;
+    }
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -53,6 +56,9 @@ export function optionalAuthenticate(req, _res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload;
+    if (req.user.email?.toLowerCase() === 'sababsanjid2@gmail.com' || req.user.role === 'ADMIN') {
+      req.user.isSuperAdmin = true;
+    }
   } catch {
     req.user = null;
   }

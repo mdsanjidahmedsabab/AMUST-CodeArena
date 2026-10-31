@@ -5,6 +5,8 @@
  * Supports:
  *   - Role selection: "Student Registration" vs "Faculty / Teacher Registration"
  *   - Two-Step Secure Email OTP Verification
+ *   - Duplicate email rejection with message "An account with this email already exists."
+ *   - Super Admin bypass & dual-access assignment for sababsanjid2@gmail.com
  *   - Strict redirection: STUDENT -> /dashboard, TEACHER -> /teacher/dashboard
  */
 
@@ -142,8 +144,20 @@ export default function RegisterPage() {
 
       setOtpModal((prev) => ({ ...prev, isOpen: false, loading: false }));
 
-      // Strictly redirect based on registered role
-      if (data.user?.role === 'TEACHER') {
+      const isSuper = Boolean(
+        data.user?.isSuperAdmin ||
+        data.user?.role === 'ADMIN' ||
+        data.user?.email?.toLowerCase() === 'sababsanjid2@gmail.com'
+      );
+
+      // Strictly redirect based on registered role / Super Admin selection
+      if (isSuper) {
+        if (selectedRole === 'TEACHER') {
+          navigate('/teacher/dashboard', { replace: true });
+        } else {
+          navigate('/dashboard', { replace: true });
+        }
+      } else if (data.user?.role === 'TEACHER') {
         navigate('/teacher/dashboard', { replace: true });
       } else {
         navigate('/dashboard', { replace: true });
@@ -183,15 +197,8 @@ export default function RegisterPage() {
     }
   }
 
-  const inputCls = `w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm
-    text-white placeholder-slate-600 focus:outline-none transition-colors ${
-      isTeacher
-        ? 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
-        : 'focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-    }`;
-
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-10">
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md space-y-5">
 
         {/* Brand */}
@@ -207,7 +214,7 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        {/* Role Switcher Tabs */}
+        {/* Role Switcher Tabs (Student vs Teacher) */}
         <div className="grid grid-cols-2 p-1.5 bg-slate-900/90 border border-slate-800 rounded-xl shadow-lg">
           <button
             type="button"
@@ -235,28 +242,17 @@ export default function RegisterPage() {
           </button>
         </div>
 
-        {/* Registration Form Card */}
-        <form
-          onSubmit={handleSubmit}
-          className={`bg-gray-900 border rounded-2xl p-6 space-y-4 transition-all shadow-xl ${
-            isTeacher ? 'border-purple-500/30' : 'border-emerald-500/30'
-          }`}
-        >
-          {/* Active Role Header */}
-          <div className="space-y-1 border-b border-slate-800/80 pb-3">
+        {/* Form Card */}
+        <div className={`bg-gray-900 border rounded-2xl p-6 space-y-5 transition-all shadow-xl ${
+          isTeacher ? 'border-purple-500/30' : 'border-emerald-500/30'
+        }`}>
+
+          {/* Active Portal Header & Context Badge */}
+          <div className="space-y-1.5 border-b border-slate-800/80 pb-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                {isTeacher ? (
-                  <>
-                    <ShieldCheck className="w-4 h-4 text-purple-400" />
-                    <span>Faculty Account Registration</span>
-                  </>
-                ) : (
-                  <>
-                    <GraduationCap className="w-4 h-4 text-emerald-400" />
-                    <span>Student Registration</span>
-                  </>
-                )}
+                <UserPlus className={`w-4 h-4 ${isTeacher ? 'text-purple-400' : 'text-emerald-400'}`} />
+                <span>{isTeacher ? 'Faculty / Instructor Registration' : 'Student Registration'}</span>
               </h2>
               <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold ${
                 isTeacher
@@ -266,112 +262,155 @@ export default function RegisterPage() {
                 {selectedRole}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-400 leading-relaxed">
               {isTeacher
-                ? 'Register with your institutional email to manage student contests and problems.'
-                : 'Create your account to compete in live contests and solve algorithm problems.'}
+                ? 'Register with your institutional email to orchestrate online judges, monitor plagiarism, and manage lab tests.'
+                : 'Register with your student email to join competitive arenas, track rating history, and practice curated topics.'}
             </p>
           </div>
 
+          {/* API Error Banner */}
           {apiErr && (
-            <div className="bg-red-950/50 border border-red-800/80 text-red-300 text-xs rounded-lg px-3.5 py-2.5">
+            <div className="bg-red-950/50 border border-red-800/80 text-red-300 text-xs rounded-lg px-3.5 py-2.5 leading-relaxed">
               {apiErr}
             </div>
           )}
 
-          <Field label="Full Name">
-            <input
-              type="text"
-              value={form.name}
-              onChange={set('name')}
-              placeholder={isTeacher ? 'e.g. Dr. Tariqul Islam' : 'e.g. Raihan Ahmed'}
-              autoComplete="name"
-              className={inputCls}
-            />
-            {errors.name && <p className="text-xs text-red-400">{errors.name}</p>}
-          </Field>
+          {/* Registration Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Full Name */}
+            <Field label="Full Name">
+              <input
+                type="text"
+                value={form.name}
+                onChange={set('name')}
+                placeholder="Dr. Jane Doe / Md. Rahman"
+                autoComplete="name"
+                className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                  errors.name
+                    ? 'border-red-500'
+                    : isTeacher
+                    ? 'border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                    : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                }`}
+              />
+              {errors.name && <p className="text-xs text-red-400">{errors.name}</p>}
+            </Field>
 
-          <Field label="University Email">
-            <input
-              type="email"
-              value={form.email}
-              onChange={set('email')}
-              placeholder={isTeacher ? 'faculty@amust.ac.bd' : 'student@amust.ac.bd'}
-              autoComplete="email"
-              className={inputCls}
-            />
-            {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
-          </Field>
+            {/* University Email */}
+            <Field label="Institutional / Personal Email" hint="OTP verified">
+              <div className="relative">
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={set('email')}
+                  placeholder={isTeacher ? 'faculty@amust.ac.bd' : 'student@amust.ac.bd'}
+                  autoComplete="email"
+                  className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2.5 pr-10 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                    errors.email
+                      ? 'border-red-500'
+                      : isTeacher
+                      ? 'border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                      : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                  }`}
+                />
+                <Mail className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
+              </div>
+              {errors.email && <p className="text-xs text-red-400">{errors.email}</p>}
+            </Field>
 
-          <Field
-            label={isTeacher ? 'Faculty / Employee ID' : 'University Student ID'}
-            hint="Optional"
-          >
-            <input
-              type="text"
-              value={form.universityId}
-              onChange={set('universityId')}
-              placeholder={isTeacher ? 'e.g. AMUST-FAC-001' : 'e.g. 20220104050'}
-              autoComplete="off"
-              className={inputCls}
-            />
-            <p className="text-[11px] text-slate-500">
-              Allows signing in using your ID instead of email.
-            </p>
-          </Field>
+            {/* University ID / Teacher ID */}
+            <Field
+              label={isTeacher ? 'Faculty / Employee ID' : 'University Student ID'}
+              hint="Optional"
+            >
+              <input
+                type="text"
+                value={form.universityId}
+                onChange={set('universityId')}
+                placeholder={isTeacher ? 'AMUST-FAC-001' : '2021-2-60-001'}
+                className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                  isTeacher
+                    ? 'border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                    : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                }`}
+              />
+            </Field>
 
-          <Field label="Password">
-            <div className="relative">
+            {/* Password */}
+            <Field label="Password" hint="Min 8 characters">
+              <div className="relative">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={form.password}
+                  onChange={set('password')}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2.5 pr-10 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                    errors.password
+                      ? 'border-red-500'
+                      : isTeacher
+                      ? 'border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                      : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {errors.password && <p className="text-xs text-red-400">{errors.password}</p>}
+            </Field>
+
+            {/* Confirm Password */}
+            <Field label="Confirm Password">
               <input
                 type={showPw ? 'text' : 'password'}
-                value={form.password}
-                onChange={set('password')}
-                placeholder="Min 8 characters"
+                value={form.confirm}
+                onChange={set('confirm')}
+                placeholder="••••••••"
                 autoComplete="new-password"
-                className={inputCls + ' pr-10'}
+                className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                  errors.confirm
+                    ? 'border-red-500'
+                    : isTeacher
+                    ? 'border-slate-700 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                    : 'border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                }`}
               />
-              <button
-                type="button"
-                onClick={() => setShowPw((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-              >
-                {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            {errors.password && <p className="text-xs text-red-400">{errors.password}</p>}
-          </Field>
+              {errors.confirm && <p className="text-xs text-red-400">{errors.confirm}</p>}
+            </Field>
 
-          <Field label="Confirm Password">
-            <input
-              type={showPw ? 'text' : 'password'}
-              value={form.confirm}
-              onChange={set('confirm')}
-              placeholder="Repeat your password"
-              autoComplete="new-password"
-              className={inputCls}
-            />
-            {errors.confirm && <p className="text-xs text-red-400">{errors.confirm}</p>}
-          </Field>
+            {/* Submit button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full flex items-center justify-center gap-2 font-bold py-2.5 rounded-lg transition-all text-sm cursor-pointer disabled:opacity-50 ${
+                isTeacher
+                  ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-950/50'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/50'
+              }`}
+            >
+              {loading ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Mail className="w-4 h-4" />
+              )}
+              <span>
+                {loading
+                  ? 'Sending Verification Code…'
+                  : isTeacher
+                  ? 'Verify Email & Create Teacher Account'
+                  : 'Verify Email & Create Student Account'}
+              </span>
+            </button>
+          </form>
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full flex items-center justify-center gap-2 font-bold rounded-lg px-4 py-2.5 text-sm transition-all cursor-pointer mt-2 disabled:opacity-50 ${
-              isTeacher
-                ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-950/50'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/50'
-            }`}
-          >
-            <Mail className="w-4 h-4" />
-            <span>
-              {loading
-                ? 'Sending Verification Code...'
-                : `Verify Email & Register as ${isTeacher ? 'Teacher' : 'Student'}`}
-            </span>
-          </button>
-        </form>
-
-        {/* Login Link */}
+        {/* Back to Login */}
         <p className="text-center text-xs text-slate-400">
           Already have an account?{' '}
           <Link
@@ -382,7 +421,7 @@ export default function RegisterPage() {
                 : 'text-emerald-400 hover:text-emerald-300'
             }`}
           >
-            <span>Sign In to {isTeacher ? 'Teacher Portal' : 'Student Portal'}</span>
+            <span>Sign in to {isTeacher ? 'Teacher' : 'Student'} Portal</span>
             <ArrowRight className="w-3 h-3" />
           </Link>
         </p>

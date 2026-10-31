@@ -1,12 +1,12 @@
 /**
  * pages/LoginPage.jsx
  * ────────────────────
- * Unified Authentication Page with Role-Based Portal Switcher.
+ * Standard Unified Email/Password Authentication Page with Role-Based Portal Switcher.
  * Supports:
  *   - Role selection: "Student Portal" vs "Teacher Portal"
- *   - Dual-identifier login: Email OR University / Faculty ID
- *   - Authentication methods: Password OR Secure Email OTP
+ *   - Routine flow: Standard Email / University ID + Password (No OTP required during login)
  *   - Strict redirection: STUDENT -> /dashboard, TEACHER -> /teacher/dashboard
+ *   - Super Admin bypass for sababsanjid2@gmail.com
  */
 
 import { useState } from 'react';
@@ -15,19 +15,15 @@ import {
   Eye,
   EyeOff,
   LogIn,
-  Mail,
-  KeyRound,
   GraduationCap,
   ShieldCheck,
   ArrowRight,
 } from 'lucide-react';
 import ArenaLogo from '../components/ArenaLogo';
-import OtpVerificationModal from '../components/OtpVerificationModal';
 import { useAuth } from '../contexts/AuthContext';
-import api from '../api/client';
 
 export default function LoginPage() {
-  const { login, loginWithOtp } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -35,23 +31,11 @@ export default function LoginPage() {
   const initialRole = searchParams.get('role')?.toUpperCase() === 'TEACHER' ? 'TEACHER' : 'STUDENT';
   const [selectedRole, setSelectedRole] = useState(initialRole);
 
-  const [loginMode, setLoginMode] = useState('password'); // 'password' | 'otp'
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // OTP Verification Modal State
-  const [otpModal, setOtpModal] = useState({
-    isOpen: false,
-    email: '',
-    maskedEmail: '',
-    devOtp: null,
-    loading: false,
-    error: '',
-    attemptsRemaining: null,
-  });
 
   const isTeacher = selectedRole === 'TEACHER';
 
@@ -61,7 +45,7 @@ export default function LoginPage() {
     setError('');
   };
 
-  // Standard Password Login
+  // Standard Routine Email + Password Login
   async function handlePasswordSubmit(e) {
     e.preventDefault();
     setError('');
@@ -73,98 +57,31 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const user = await login(identifier.trim(), password, selectedRole);
-      // Strictly enforce role-based destination portal
-      if (user.role === 'TEACHER') {
+
+      const isSuper = Boolean(
+        user?.isSuperAdmin ||
+        user?.role === 'ADMIN' ||
+        user?.email?.toLowerCase() === 'sababsanjid2@gmail.com'
+      );
+
+      // Redirection logic
+      if (isSuper) {
+        if (selectedRole === 'TEACHER') {
+          navigate('/teacher/dashboard', { replace: true });
+        } else {
+          navigate('/dashboard', { replace: true });
+        }
+      } else if (user.role === 'TEACHER') {
         navigate('/teacher/dashboard', { replace: true });
       } else {
         navigate('/dashboard', { replace: true });
       }
     } catch (err) {
       setError(
-        err.response?.data?.error ?? 'Login failed. Check your credentials and portal role.'
+        err.response?.data?.error ?? 'Login failed. Check your password and portal selection.'
       );
     } finally {
       setLoading(false);
-    }
-  }
-
-  // Step 1: Initiate Email OTP Login
-  async function handleOtpInitSubmit(e) {
-    e.preventDefault();
-    setError('');
-    if (!identifier.trim()) {
-      setError(`Please enter your ${isTeacher ? 'faculty email or employee ID' : 'student email or university ID'}.`);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { data } = await api.post('/auth/login-otp-init', {
-        identifier: identifier.trim(),
-        expectedRole: selectedRole,
-      });
-
-      // Open OTP Verification Modal
-      setOtpModal({
-        isOpen: true,
-        email: data.email,
-        maskedEmail: data.maskedEmail || data.email,
-        devOtp: data.devOtp || null,
-        loading: false,
-        error: '',
-        attemptsRemaining: null,
-      });
-    } catch (err) {
-      setError(
-        err.response?.data?.error ?? 'Failed to send login verification code. Please check your credentials.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Step 2: Verify Submitted Login OTP
-  async function handleVerifyOtp(otp) {
-    setOtpModal((prev) => ({ ...prev, loading: true, error: '' }));
-    try {
-      const user = await loginWithOtp(otpModal.email, otp);
-      setOtpModal((prev) => ({ ...prev, isOpen: false, loading: false }));
-
-      // Strictly enforce role-based destination portal
-      if (user.role === 'TEACHER') {
-        navigate('/teacher/dashboard', { replace: true });
-      } else {
-        navigate('/dashboard', { replace: true });
-      }
-    } catch (err) {
-      const respData = err.response?.data || {};
-      setOtpModal((prev) => ({
-        ...prev,
-        loading: false,
-        error: respData.error || 'Verification failed. Please check the code.',
-        attemptsRemaining: respData.attemptsRemaining,
-      }));
-    }
-  }
-
-  // Resend OTP inside modal
-  async function handleResendOtp() {
-    try {
-      const { data } = await api.post('/auth/login-otp-init', {
-        identifier: identifier.trim(),
-        expectedRole: selectedRole,
-      });
-      setOtpModal((prev) => ({
-        ...prev,
-        error: '',
-        devOtp: data.devOtp || null,
-      }));
-      return data.devOtp;
-    } catch (err) {
-      setOtpModal((prev) => ({
-        ...prev,
-        error: err.response?.data?.error || 'Failed to resend code.',
-      }));
     }
   }
 
@@ -249,36 +166,6 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Auth Method Switcher Tabs (Password vs OTP) */}
-          <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => { setLoginMode('password'); setError(''); }}
-              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                loginMode === 'password'
-                  ? 'bg-slate-800 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>Password</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setLoginMode('otp'); setError(''); }}
-              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                loginMode === 'otp'
-                  ? isTeacher
-                    ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 shadow-sm'
-                    : 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span>Email OTP</span>
-            </button>
-          </div>
-
           {/* Error Banner */}
           {error && (
             <div className="bg-red-950/50 border border-red-800/80 text-red-300 text-xs rounded-lg px-3.5 py-2.5 leading-relaxed">
@@ -287,10 +174,7 @@ export default function LoginPage() {
           )}
 
           {/* Form */}
-          <form
-            onSubmit={loginMode === 'password' ? handlePasswordSubmit : handleOtpInitSubmit}
-            className="space-y-4"
-          >
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
             {/* Identifier */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
@@ -315,43 +199,34 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Password (Only in password mode) */}
-            {loginMode === 'password' && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPw ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 pr-10 text-sm
-                               text-white placeholder-slate-600 focus:outline-none transition-colors ${
-                                 isTeacher
-                                   ? 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
-                                   : 'focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                               }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                  >
-                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+            {/* Password */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 pr-10 text-sm
+                             text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                               isTeacher
+                                 ? 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                                 : 'focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                             }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
-            )}
-
-            {/* OTP Notice */}
-            {loginMode === 'otp' && (
-              <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-lg border border-slate-800">
-                🔒 A single-use 6-digit verification code will be sent to your registered university email address. Valid for 5 minutes.
-              </p>
-            )}
+            </div>
 
             {/* Submit Button */}
             <button
@@ -365,18 +240,12 @@ export default function LoginPage() {
             >
               {loading ? (
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              ) : loginMode === 'otp' ? (
-                <Mail className="w-4 h-4" />
               ) : (
                 <LogIn className="w-4 h-4" />
               )}
               <span>
                 {loading
-                  ? loginMode === 'otp'
-                    ? 'Sending Verification Code...'
-                    : 'Signing In…'
-                  : loginMode === 'otp'
-                  ? 'Send Login Code'
+                  ? 'Signing In…'
                   : isTeacher
                   ? 'Sign In to Faculty Portal'
                   : 'Sign In to Student Portal'}
@@ -416,21 +285,6 @@ export default function LoginPage() {
         </p>
 
       </div>
-
-      {/* ── 6-Digit Email OTP Verification Modal ── */}
-      <OtpVerificationModal
-        isOpen={otpModal.isOpen}
-        onClose={() => setOtpModal((prev) => ({ ...prev, isOpen: false }))}
-        email={otpModal.email}
-        maskedEmail={otpModal.maskedEmail}
-        purpose="LOGIN"
-        onVerify={handleVerifyOtp}
-        onResend={handleResendOtp}
-        devOtp={otpModal.devOtp}
-        loading={otpModal.loading}
-        error={otpModal.error}
-        attemptsRemaining={otpModal.attemptsRemaining}
-      />
     </div>
   );
 }

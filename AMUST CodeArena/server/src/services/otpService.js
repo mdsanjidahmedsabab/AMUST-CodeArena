@@ -249,7 +249,7 @@ export async function sendOtpEmail({ to, otp, purpose }) {
     }
   }
 
-  return true;
+  return { success: true, otp };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

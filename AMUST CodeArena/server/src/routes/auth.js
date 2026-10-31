@@ -97,8 +97,13 @@ router.post('/register-init', authLimiter, async (req, res, next) => {
     });
 
     if (conflict) {
+      if (conflict.email.toLowerCase() === email.toLowerCase()) {
+        return res.status(409).json({
+          error: 'An account with this email already exists.',
+        });
+      }
       return res.status(409).json({
-        error: 'Email or University ID is already registered',
+        error: 'University ID is already registered.',
       });
     }
 
@@ -175,18 +180,40 @@ router.post('/register-verify', authLimiter, async (req, res, next) => {
     });
 
     if (conflict) {
+      if (conflict.email.toLowerCase() === email.toLowerCase()) {
+        return res.status(409).json({
+          error: 'An account with this email already exists.',
+        });
+      }
       return res.status(409).json({
-        error: 'Email or University ID is already registered',
+        error: 'University ID is already registered.',
       });
     }
 
-    // Persist verified user record in PostgreSQL with isVerified: true
+    // Super Admin privilege check for sababsanjid2@gmail.com
+    const isSuperEmail = email.toLowerCase() === 'sababsanjid2@gmail.com';
+    const assignedRole = isSuperEmail ? 'ADMIN' : role;
+
+    // Persist verified user record in PostgreSQL
     const user = await prisma.user.create({
-      data: { name, email, universityId, passwordHash, role, isVerified: true },
+      data: {
+        name,
+        email,
+        universityId,
+        passwordHash,
+        role: assignedRole,
+        isVerified: true,
+        isSuperAdmin: isSuperEmail,
+      },
     });
 
     // Issue authentication tokens
-    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      isSuperAdmin: Boolean(user.isSuperAdmin || isSuperEmail),
+    });
     const refreshToken = signRefreshToken({ id: user.id });
 
     const refreshTokenHash = await hashPassword(refreshToken);
@@ -208,7 +235,7 @@ router.post('/register-verify', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// 3. POST /api/auth/login-otp-init (Step 1: Validate Credentials & Send Login OTP)
+// 3. POST /api/auth/login-otp-init (Legacy / Optional OTP Flow)
 // ─────────────────────────────────────────
 router.post('/login-otp-init', authLimiter, async (req, res, next) => {
   try {
@@ -222,22 +249,25 @@ router.post('/login-otp-init', authLimiter, async (req, res, next) => {
 
     const { identifier, password } = parsed.data;
 
-    // Lookup user by email OR universityId
     const user = await findUserByIdentifier(identifier);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Role portal validation: reject if user role does not match selected portal tab
+    const isSuper = Boolean(
+      user.isSuperAdmin ||
+      user.role === 'ADMIN' ||
+      user.email.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
     const targetRole = parsed.data.expectedRole || parsed.data.role;
-    if (targetRole && user.role !== targetRole && user.role !== 'ADMIN') {
+    if (targetRole && user.role !== targetRole && !isSuper) {
       return res.status(403).json({
         error: `This account is registered with the ${user.role} role. Please switch to the ${user.role === 'TEACHER' ? 'Teacher' : 'Student'} portal tab.`,
         userRole: user.role,
       });
     }
 
-    // If password provided, verify password hash
     if (password) {
       const validPw = await verifyPassword(password, user.passwordHash);
       if (!validPw) {
@@ -245,7 +275,6 @@ router.post('/login-otp-init', authLimiter, async (req, res, next) => {
       }
     }
 
-    // Generate & send login OTP
     const otpResult = await generateAndSendOtp({
       email: user.email,
       purpose: 'LOGIN',
@@ -268,7 +297,7 @@ router.post('/login-otp-init', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// 4. POST /api/auth/login-otp-verify (Step 2: Verify Login OTP & Issue Session)
+// 4. POST /api/auth/login-otp-verify (Legacy / Optional OTP Verification)
 // ─────────────────────────────────────────
 router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
   try {
@@ -309,7 +338,6 @@ router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
       return res.status(404).json({ error: 'User account not found' });
     }
 
-    // Ensure isVerified is true upon successful OTP verification
     if (!user.isVerified) {
       await prisma.user.update({
         where: { id: user.id },
@@ -318,8 +346,18 @@ router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
       user.isVerified = true;
     }
 
-    // Issue authentication tokens
-    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    const isSuper = Boolean(
+      user.isSuperAdmin ||
+      user.role === 'ADMIN' ||
+      user.email.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      isSuperAdmin: isSuper,
+    });
     const refreshToken = signRefreshToken({ id: user.id });
 
     const refreshTokenHash = await hashPassword(refreshToken);
@@ -341,7 +379,7 @@ router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/register (Standard Direct Registration)
+// 5. POST /api/auth/register (Standard Direct Registration)
 // ─────────────────────────────────────────
 router.post('/register', authLimiter, async (req, res, next) => {
   try {
@@ -355,7 +393,6 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     const { name, email, universityId, password, role } = parsed.data;
 
-    // Check uniqueness — email and universityId must both be free
     const conflict = await prisma.user.findFirst({
       where: {
         OR: [
@@ -365,14 +402,29 @@ router.post('/register', authLimiter, async (req, res, next) => {
       },
     });
     if (conflict) {
+      if (conflict.email.toLowerCase() === email.toLowerCase()) {
+        return res.status(409).json({
+          error: 'An account with this email already exists.',
+        });
+      }
       return res.status(409).json({
-        error: 'Email or University ID is already registered',
+        error: 'University ID is already registered.',
       });
     }
 
+    const isSuperEmail = email.toLowerCase() === 'sababsanjid2@gmail.com';
+    const assignedRole = isSuperEmail ? 'ADMIN' : role;
     const passwordHash = await hashPassword(password);
     const user = await prisma.user.create({
-      data: { name, email, universityId, passwordHash, role, isVerified: true },
+      data: {
+        name,
+        email,
+        universityId,
+        passwordHash,
+        role: assignedRole,
+        isVerified: true,
+        isSuperAdmin: isSuperEmail,
+      },
     });
 
     return res.status(201).json({
@@ -385,7 +437,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/login (Standard Direct Login)
+// 6. POST /api/auth/login (Standard Direct Email/Password Login — Routine Flow)
 // ─────────────────────────────────────────
 router.post('/login', authLimiter, async (req, res, next) => {
   try {
@@ -402,37 +454,56 @@ router.post('/login', authLimiter, async (req, res, next) => {
     // Dual-identifier lookup: email OR universityId
     const user = await findUserByIdentifier(identifier);
 
-    // Use a generic error to avoid user enumeration
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Role portal validation: reject if user role does not match selected portal tab
+    const isSuper = Boolean(
+      user.isSuperAdmin ||
+      user.role === 'ADMIN' ||
+      user.email.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
+    // Auto-upgrade sababsanjid2@gmail.com to Super Admin / ADMIN if not already set
+    if (user.email.toLowerCase() === 'sababsanjid2@gmail.com' && (!user.isSuperAdmin || user.role !== 'ADMIN')) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { isSuperAdmin: true, role: 'ADMIN' },
+      });
+      user.isSuperAdmin = true;
+      user.role = 'ADMIN';
+    }
+
+    // Role portal validation: reject if user role does not match selected portal tab (Super Admin bypassed)
     const targetRole = parsed.data.expectedRole || parsed.data.role;
-    if (targetRole && user.role !== targetRole && user.role !== 'ADMIN') {
+    if (targetRole && user.role !== targetRole && !isSuper) {
       return res.status(403).json({
         error: `This account is registered with the ${user.role} role. Please switch to the ${user.role === 'TEACHER' ? 'Teacher' : 'Student'} portal tab.`,
         userRole: user.role,
       });
     }
 
+    // Verify password hash
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Issue tokens
-    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    // Issue authentication tokens immediately (No OTP required for routine login)
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      isSuperAdmin: isSuper,
+    });
     const refreshToken = signRefreshToken({ id: user.id });
 
-    // Store a hashed copy of the refresh token to support server-side invalidation
     const refreshTokenHash = await hashPassword(refreshToken);
     await prisma.user.update({
       where: { id: user.id },
       data: { refreshTokenHash },
     });
 
-    // Refresh token goes into HttpOnly cookie — never exposed to JS
     res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTS);
 
     return res.json({
@@ -445,8 +516,7 @@ router.post('/login', authLimiter, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/refresh
-// Silent token rotation — reads HttpOnly cookie
+// 7. POST /api/auth/refresh (Silent token rotation)
 // ─────────────────────────────────────────
 router.post('/refresh', async (req, res, next) => {
   try {
@@ -467,7 +537,18 @@ router.post('/refresh', async (req, res, next) => {
       return res.status(401).json({ error: 'Session has been invalidated' });
     }
 
-    const accessToken = signAccessToken({ id: user.id, role: user.role });
+    const isSuper = Boolean(
+      user.isSuperAdmin ||
+      user.role === 'ADMIN' ||
+      user.email.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      isSuperAdmin: isSuper,
+    });
     return res.json({ accessToken, user: safeUser(user) });
   } catch (err) {
     next(err);
@@ -475,17 +556,15 @@ router.post('/refresh', async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/logout
+// 8. POST /api/auth/logout
 // ─────────────────────────────────────────
 router.post('/logout', authenticate, async (req, res, next) => {
   try {
-    // Invalidate the server-side refresh token record
     await prisma.user.update({
       where: { id: req.user.id },
       data: { refreshTokenHash: null },
     });
 
-    // Clear the HttpOnly cookie
     res.clearCookie('refreshToken', { path: '/api/auth' });
     return res.json({ message: 'Logged out successfully' });
   } catch (err) {
@@ -494,8 +573,7 @@ router.post('/logout', authenticate, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// GET /api/auth/me
-// Return the currently authenticated user's profile
+// 9. GET /api/auth/me
 // ─────────────────────────────────────────
 router.get('/me', authenticate, async (req, res, next) => {
   try {
@@ -508,13 +586,19 @@ router.get('/me', authenticate, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────
-// POST /api/auth/dev-switch-role
-// Development & Demo mode: Switch user role dynamically
+// 10. POST /api/auth/dev-switch-role (Super Admin & Dev Role Switcher)
 // ─────────────────────────────────────────
 router.post('/dev-switch-role', authenticate, async (req, res, next) => {
   try {
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(403).json({ error: 'Role switching is disabled in production.' });
+    const isSuper = Boolean(
+      req.user.isSuperAdmin ||
+      req.user.role === 'ADMIN' ||
+      req.user.email?.toLowerCase() === 'sababsanjid2@gmail.com'
+    );
+
+    // Regular users cannot switch roles in production
+    if (!isSuper && process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Role switching is restricted to Super Admin.' });
     }
 
     const { role } = req.body;
@@ -527,7 +611,12 @@ router.post('/dev-switch-role', authenticate, async (req, res, next) => {
       data: { role },
     });
 
-    const accessToken = signAccessToken({ id: updatedUser.id, role: updatedUser.role });
+    const accessToken = signAccessToken({
+      id: updatedUser.id,
+      role: updatedUser.role,
+      email: updatedUser.email,
+      isSuperAdmin: isSuper,
+    });
 
     return res.json({
       message: `Role switched to ${role}`,
