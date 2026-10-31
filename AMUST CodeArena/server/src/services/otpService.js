@@ -3,14 +3,20 @@
  * ──────────────────────
  * Secure Time-Limited Email OTP Service (Registration & 2FA / Passwordless Login).
  *
- * Security Invariants & Protections:
+ * Security Invariants & Anti-Spam Deliverability Protections:
  *   1. Cryptographically secure 6-digit integer generation (crypto.randomInt).
  *   2. SHA-256 HMAC / Salted Hashing before persistence.
  *   3. Redis storage with strict 300-second (5-minute) TTL and in-memory dual fallback.
  *   4. Strict rate limiting: Maximum 3 OTP requests per email per 10 minutes.
  *   5. Brute-force lockout: Maximum 5 incorrect verification attempts before immediate invalidation.
  *   6. Single-use: OTP record is instantly destroyed upon successful verification (replay attack prevention).
- *   7. Nodemailer SMTP transporter with automatic dev/test console fallback and devOtp capture.
+ *   7. Nodemailer SMTP transporter optimized for Primary Inbox deliverability:
+ *      - Professional sender identity (AMUST CodeArena <support@...>)
+ *      - Direct subject line: "Your AMUST CodeArena Verification Code: [OTP]"
+ *      - High text-to-HTML ratio, clean transactional HTML layout, zero spam buzzwords
+ *      - Plaintext fallback (text: ...) alongside HTML
+ *      - Transactional email headers (X-Priority: 1, Importance: high, Auto-Submitted)
+ *      - Automatic dev/test console fallback and devOtp capture.
  */
 
 import crypto from 'crypto';
@@ -69,10 +75,12 @@ let mailTransporter = null;
 function getMailTransporter() {
   if (mailTransporter) return mailTransporter;
 
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT) || 587;
   const user = process.env.SMTP_USER || process.env.EMAIL_USER;
   const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+  const host =
+    process.env.SMTP_HOST ||
+    (user && user.includes('@gmail.com') ? 'smtp.gmail.com' : undefined);
+  const port = Number(process.env.SMTP_PORT) || 587;
 
   if (host && user && pass) {
     mailTransporter = nodemailer.createTransport({
@@ -80,18 +88,26 @@ function getMailTransporter() {
       port,
       secure: port === 465,
       auth: { user, pass },
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      tls: {
+        rejectUnauthorized: process.env.NODE_ENV === 'production',
+      },
     });
   }
   return mailTransporter;
 }
 
 /**
- * Sends stylized HTML verification email or logs to console in dev/test mode.
+ * Sends stylized, anti-spam optimized HTML verification email with plaintext fallback.
  */
 export async function sendOtpEmail({ to, otp, purpose }) {
   const masked = maskEmail(to);
-  const purposeLabel = purpose === 'REGISTRATION' ? 'Account Registration' : 'Secure Login Verification';
+  const purposeLabel =
+    purpose === 'REGISTRATION' ? 'Account Registration' : 'Secure Login Verification';
   const transporter = getMailTransporter();
+  const user = process.env.SMTP_USER || process.env.EMAIL_USER;
 
   // Log to server console for local dev & testing transparency
   console.log(`\n📨 [EMAIL OTP DISPATCH]`);
@@ -102,29 +118,134 @@ export async function sendOtpEmail({ to, otp, purpose }) {
 
   devOtpLog.set(`${purpose}:${to.toLowerCase()}`, otp);
 
-  // If live SMTP credentials are configured, dispatch real email
-  if (transporter && process.env.NODE_ENV === 'production') {
+  // Professional sender format avoiding spam triggers
+  const fromAddr =
+    process.env.SMTP_FROM ||
+    (user ? `"AMUST CodeArena" <${user}>` : '"AMUST CodeArena" <support@amust.ac.bd>');
+
+  // Subject line strictly formatted for primary inbox placement
+  const subject = `Your AMUST CodeArena Verification Code: ${otp}`;
+
+  // Plaintext fallback for mail clients and anti-spam scanners
+  const textContent = [
+    `Your AMUST CodeArena verification code is: ${otp}`,
+    '',
+    `This code is valid for 5 minutes. Enter this code to complete your ${purposeLabel.toLowerCase()}.`,
+    '',
+    'Security Notice:',
+    '- Do not share this verification code with anyone.',
+    '- AMUST faculty and administrators will never ask for your code.',
+    '- If you did not request this verification code, please ignore this email. Your account remains secure.',
+    '',
+    '—',
+    'AMUST CodeArena Platform',
+    'Ahsania Mission University of Science and Technology',
+  ].join('\n');
+
+  // Minimal, high-deliverability transactional HTML email
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMUST CodeArena Verification Code</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #030712; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #030712; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 480px; background-color: #0f172a; border-radius: 12px; border: 1px solid #1e293b; overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 28px 32px 12px 32px; border-bottom: 1px solid #1e293b;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td>
+                    <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; letter-spacing: -0.02em;">
+                      AMUST <span style="color: #10b981;">CodeArena</span>
+                    </h1>
+                    <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; font-weight: 500;">
+                      Official Academic Online Judge & LMS
+                    </p>
+                  </td>
+                  <td align="right">
+                    <span style="display: inline-block; padding: 4px 10px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 9999px; font-size: 11px; font-weight: 600; color: #34d399;">
+                      OTP Verification
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding: 28px 32px;">
+              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+                Hello,
+              </p>
+              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+                Use the following 6-digit verification code to complete your <strong>${purposeLabel.toLowerCase()}</strong> on AMUST CodeArena:
+              </p>
+              <!-- Verification Code Display -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 20px 0;">
+                <tr>
+                  <td align="center" style="background-color: #020617; border: 2px dashed #10b981; border-radius: 8px; padding: 20px 16px;">
+                    <div style="font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #10b981;">
+                      ${otp}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 20px 0 8px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
+                ⏱️ This code is valid for <strong>5 minutes</strong> (300 seconds).
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 12px; line-height: 1.5; color: #64748b;">
+                For your security, never share this code with anyone. AMUST administrators will never ask for your verification code.
+              </p>
+              <div style="border-top: 1px solid #1e293b; padding-top: 16px;">
+                <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #64748b;">
+                  If you did not request this verification code, please ignore this email. No changes will be made to your account.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #090d16; padding: 16px 32px; border-top: 1px solid #1e293b; text-align: center;">
+              <p style="margin: 0; font-size: 11px; color: #475569;">
+                © 2026 Ahsania Mission University of Science and Technology (AMUST). All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  // Dispatch real email if SMTP transporter is configured
+  if (transporter) {
     try {
-      const fromAddr = process.env.SMTP_FROM || '"AMUST CodeArena" <noreply@amust.ac.bd>';
       await transporter.sendMail({
         from: fromAddr,
         to,
-        subject: `[AMUST CodeArena] Your ${purposeLabel} Verification Code: ${otp}`,
-        text: `Your verification code for AMUST CodeArena ${purposeLabel} is: ${otp}\n\nThis code expires in 5 minutes. Do not share it with anyone.`,
-        html: `
-          <div style="font-family: Arial, sans-serif; background-color: #0b0f19; color: #f1f5f9; padding: 24px; border-radius: 12px; max-width: 500px; margin: auto; border: 1px solid #1e293b;">
-            <h2 style="color: #10b981; margin-top: 0;">AMUST CodeArena</h2>
-            <p style="font-size: 14px; color: #94a3b8;">${purposeLabel}</p>
-            <p style="font-size: 14px;">Use the verification code below to complete your authentication. This code is valid for <strong>5 minutes</strong>.</p>
-            <div style="background-color: #020617; border: 2px dashed #10b981; border-radius: 8px; padding: 18px; text-align: center; margin: 20px 0;">
-              <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #34d399;">${otp}</span>
-            </div>
-            <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">If you did not request this code, please ignore this email or contact the contest administrator.</p>
-          </div>
-        `,
+        replyTo: process.env.SMTP_REPLY_TO || fromAddr,
+        subject,
+        text: textContent,
+        html: htmlContent,
+        headers: {
+          'X-Priority': '1',
+          'X-MSMail-Priority': 'High',
+          'Importance': 'high',
+          'Auto-Submitted': 'auto-generated',
+          'X-Auto-Response-Suppress': 'OOF, AutoReply',
+          'X-Entity-Ref-ID': `${purpose}-${Date.now()}`,
+        },
       });
+      console.log(`   ✅ [SMTP Dispatch Success]: Real OTP delivered to ${to}`);
     } catch (err) {
-      console.warn(`⚠️ [SMTP Dispatch Warning]: Could not send email via SMTP (${err.message}). Using terminal log.`);
+      console.warn(`   ⚠️ [SMTP Dispatch Warning]: Could not send email via SMTP (${err.message}). Using console OTP.`);
     }
   }
 

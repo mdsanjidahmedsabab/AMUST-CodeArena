@@ -102,6 +102,7 @@ model User {
   name              String
   passwordHash      String      @map("password_hash")
   role              Role        @default(STUDENT)
+  isVerified        Boolean     @default(true) @map("is_verified")
   rating            Int         @default(1200)
   tier              String      @default("Newbie")
   sessionMode       SessionMode @default(PRACTICE)

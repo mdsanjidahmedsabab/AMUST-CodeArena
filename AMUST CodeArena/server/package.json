@@ -13,6 +13,7 @@
     "seed:all-problems": "node prisma/seed_multiplatform_1500.js",
     "db:studio": "npx prisma studio",
     "test:auth": "node test/auth.test.js",
+    "test:portal-rbac": "node test/rbac_portal_otp.test.js",
     "test:problems": "node test/problems.test.js",
     "test:contests": "node test/contests.test.js",
     "test:ai": "node test/ai.test.js",

@@ -60,11 +60,15 @@ const loginSchema = z.object({
   /** Can be an email address or a university student ID */
   identifier: z.string().min(1).trim(),
   password: z.string().min(1),
+  role: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
+  expectedRole: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
 });
 
 const loginOtpInitSchema = z.object({
   identifier: z.string().min(1).trim(),
   password: z.string().optional(),
+  role: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
+  expectedRole: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
 });
 
 // ─────────────────────────────────────────
@@ -176,9 +180,9 @@ router.post('/register-verify', authLimiter, async (req, res, next) => {
       });
     }
 
-    // Persist verified user record in PostgreSQL
+    // Persist verified user record in PostgreSQL with isVerified: true
     const user = await prisma.user.create({
-      data: { name, email, universityId, passwordHash, role },
+      data: { name, email, universityId, passwordHash, role, isVerified: true },
     });
 
     // Issue authentication tokens
@@ -222,6 +226,15 @@ router.post('/login-otp-init', authLimiter, async (req, res, next) => {
     const user = await findUserByIdentifier(identifier);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Role portal validation: reject if user role does not match selected portal tab
+    const targetRole = parsed.data.expectedRole || parsed.data.role;
+    if (targetRole && user.role !== targetRole && user.role !== 'ADMIN') {
+      return res.status(403).json({
+        error: `This account is registered with the ${user.role} role. Please switch to the ${user.role === 'TEACHER' ? 'Teacher' : 'Student'} portal tab.`,
+        userRole: user.role,
+      });
     }
 
     // If password provided, verify password hash
@@ -296,6 +309,15 @@ router.post('/login-otp-verify', authLimiter, async (req, res, next) => {
       return res.status(404).json({ error: 'User account not found' });
     }
 
+    // Ensure isVerified is true upon successful OTP verification
+    if (!user.isVerified) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { isVerified: true },
+      });
+      user.isVerified = true;
+    }
+
     // Issue authentication tokens
     const accessToken = signAccessToken({ id: user.id, role: user.role });
     const refreshToken = signRefreshToken({ id: user.id });
@@ -350,7 +372,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     const passwordHash = await hashPassword(password);
     const user = await prisma.user.create({
-      data: { name, email, universityId, passwordHash, role },
+      data: { name, email, universityId, passwordHash, role, isVerified: true },
     });
 
     return res.status(201).json({
@@ -383,6 +405,15 @@ router.post('/login', authLimiter, async (req, res, next) => {
     // Use a generic error to avoid user enumeration
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Role portal validation: reject if user role does not match selected portal tab
+    const targetRole = parsed.data.expectedRole || parsed.data.role;
+    if (targetRole && user.role !== targetRole && user.role !== 'ADMIN') {
+      return res.status(403).json({
+        error: `This account is registered with the ${user.role} role. Please switch to the ${user.role === 'TEACHER' ? 'Teacher' : 'Student'} portal tab.`,
+        userRole: user.role,
+      });
     }
 
     const valid = await verifyPassword(password, user.passwordHash);

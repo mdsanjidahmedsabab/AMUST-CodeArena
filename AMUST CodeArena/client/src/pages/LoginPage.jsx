@@ -1,14 +1,26 @@
 /**
  * pages/LoginPage.jsx
  * ────────────────────
- * Dual-identifier login: accepts email OR university student ID.
- * Supports both Password authentication and secure Email OTP verification.
- * On success → STUDENT goes to /dashboard, TEACHER goes to /teacher/dashboard.
+ * Unified Authentication Page with Role-Based Portal Switcher.
+ * Supports:
+ *   - Role selection: "Student Portal" vs "Teacher Portal"
+ *   - Dual-identifier login: Email OR University / Faculty ID
+ *   - Authentication methods: Password OR Secure Email OTP
+ *   - Strict redirection: STUDENT -> /dashboard, TEACHER -> /teacher/dashboard
  */
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, LogIn, Mail, KeyRound, Sparkles } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Eye,
+  EyeOff,
+  LogIn,
+  Mail,
+  KeyRound,
+  GraduationCap,
+  ShieldCheck,
+  ArrowRight,
+} from 'lucide-react';
 import ArenaLogo from '../components/ArenaLogo';
 import OtpVerificationModal from '../components/OtpVerificationModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +29,11 @@ import api from '../api/client';
 export default function LoginPage() {
   const { login, loginWithOtp } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Role Switcher state (defaults to STUDENT unless ?role=teacher is provided in URL)
+  const initialRole = searchParams.get('role')?.toUpperCase() === 'TEACHER' ? 'TEACHER' : 'STUDENT';
+  const [selectedRole, setSelectedRole] = useState(initialRole);
 
   const [loginMode, setLoginMode] = useState('password'); // 'password' | 'otp'
   const [identifier, setIdentifier] = useState('');
@@ -36,24 +53,35 @@ export default function LoginPage() {
     attemptsRemaining: null,
   });
 
+  const isTeacher = selectedRole === 'TEACHER';
+
+  // Switch role tab
+  const handleRoleSelect = (role) => {
+    setSelectedRole(role);
+    setError('');
+  };
+
   // Standard Password Login
   async function handlePasswordSubmit(e) {
     e.preventDefault();
     setError('');
     if (!identifier.trim() || !password) {
-      setError('Please enter your email / university ID and password.');
+      setError(`Please enter your ${isTeacher ? 'faculty email / employee ID' : 'student email / university ID'} and password.`);
       return;
     }
 
     setLoading(true);
     try {
-      const user = await login(identifier.trim(), password);
-      navigate(user.role === 'TEACHER' ? '/teacher/dashboard' : '/dashboard', {
-        replace: true,
-      });
+      const user = await login(identifier.trim(), password, selectedRole);
+      // Strictly enforce role-based destination portal
+      if (user.role === 'TEACHER') {
+        navigate('/teacher/dashboard', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       setError(
-        err.response?.data?.error ?? 'Login failed. Check your credentials.'
+        err.response?.data?.error ?? 'Login failed. Check your credentials and portal role.'
       );
     } finally {
       setLoading(false);
@@ -65,7 +93,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     if (!identifier.trim()) {
-      setError('Please enter your university email or student ID.');
+      setError(`Please enter your ${isTeacher ? 'faculty email or employee ID' : 'student email or university ID'}.`);
       return;
     }
 
@@ -73,6 +101,7 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/auth/login-otp-init', {
         identifier: identifier.trim(),
+        expectedRole: selectedRole,
       });
 
       // Open OTP Verification Modal
@@ -100,9 +129,13 @@ export default function LoginPage() {
     try {
       const user = await loginWithOtp(otpModal.email, otp);
       setOtpModal((prev) => ({ ...prev, isOpen: false, loading: false }));
-      navigate(user.role === 'TEACHER' ? '/teacher/dashboard' : '/dashboard', {
-        replace: true,
-      });
+
+      // Strictly enforce role-based destination portal
+      if (user.role === 'TEACHER') {
+        navigate('/teacher/dashboard', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       const respData = err.response?.data || {};
       setOtpModal((prev) => ({
@@ -119,6 +152,7 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/auth/login-otp-init', {
         identifier: identifier.trim(),
+        expectedRole: selectedRole,
       });
       setOtpModal((prev) => ({
         ...prev,
@@ -135,8 +169,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm space-y-6">
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-5">
 
         {/* Brand */}
         <div className="text-center space-y-1">
@@ -146,21 +180,84 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-white tracking-tight">
             AMUST <span className="bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">CodeArena</span>
           </h1>
-          <p className="text-sm text-gray-400">Sign in to your competition portal</p>
+          <p className="text-xs text-slate-400">
+            Ahsania Mission University of Science & Technology
+          </p>
         </div>
 
-        {/* Form card */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5">
+        {/* Role Switcher Tabs (Student vs Teacher) */}
+        <div className="grid grid-cols-2 p-1.5 bg-slate-900/90 border border-slate-800 rounded-xl shadow-lg">
+          <button
+            type="button"
+            onClick={() => handleRoleSelect('STUDENT')}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              !isTeacher
+                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <GraduationCap className="w-4 h-4 text-emerald-400" />
+            <span>Student Portal</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleRoleSelect('TEACHER')}
+            className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              isTeacher
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm shadow-purple-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-purple-400" />
+            <span>Teacher Portal</span>
+          </button>
+        </div>
 
-          {/* Mode Switcher Tabs */}
-          <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-lg border border-gray-800 text-xs font-semibold">
+        {/* Form Card */}
+        <div className={`bg-gray-900 border rounded-2xl p-6 space-y-5 transition-all shadow-xl ${
+          isTeacher ? 'border-purple-500/30' : 'border-emerald-500/30'
+        }`}>
+
+          {/* Active Portal Header & Context Badge */}
+          <div className="space-y-1.5 border-b border-slate-800/80 pb-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                {isTeacher ? (
+                  <>
+                    <ShieldCheck className="w-4 h-4 text-purple-400" />
+                    <span>Faculty & Instructor Sign In</span>
+                  </>
+                ) : (
+                  <>
+                    <GraduationCap className="w-4 h-4 text-emerald-400" />
+                    <span>Student Sign In</span>
+                  </>
+                )}
+              </h2>
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold ${
+                isTeacher
+                  ? 'bg-purple-950/80 text-purple-300 border border-purple-500/30'
+                  : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                {selectedRole}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {isTeacher
+                ? 'Sign in to manage academic contests, author problems, and oversee student submissions.'
+                : 'Sign in to compete in university contests, practice algorithms, and track your Elo rating.'}
+            </p>
+          </div>
+
+          {/* Auth Method Switcher Tabs (Password vs OTP) */}
+          <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs font-semibold">
             <button
               type="button"
               onClick={() => { setLoginMode('password'); setError(''); }}
-              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 ${
+              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 loginMode === 'password'
-                  ? 'bg-gray-800 text-white shadow-sm'
-                  : 'text-gray-400 hover:text-gray-200'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <KeyRound className="w-3.5 h-3.5" />
@@ -169,10 +266,12 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => { setLoginMode('otp'); setError(''); }}
-              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 ${
+              className={`py-1.5 rounded-md transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 loginMode === 'otp'
-                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
-                  : 'text-gray-400 hover:text-gray-200'
+                  ? isTeacher
+                    ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 shadow-sm'
+                    : 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Mail className="w-3.5 h-3.5" />
@@ -180,9 +279,9 @@ export default function LoginPage() {
             </button>
           </div>
 
-          {/* Error banner */}
+          {/* Error Banner */}
           {error && (
-            <div className="bg-red-950/40 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-2">
+            <div className="bg-red-950/50 border border-red-800/80 text-red-300 text-xs rounded-lg px-3.5 py-2.5 leading-relaxed">
               {error}
             </div>
           )}
@@ -194,25 +293,32 @@ export default function LoginPage() {
           >
             {/* Identifier */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Email or University ID
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {isTeacher ? 'Faculty Email or Teacher ID' : 'University Email or Student ID'}
               </label>
               <input
                 type="text"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="e.g. student@amust.ac.bd or 2021-2-60-001"
+                placeholder={
+                  isTeacher
+                    ? 'teacher@amust.ac.bd or AMUST-FAC-001'
+                    : 'student@amust.ac.bd or 2021-2-60-001'
+                }
                 autoComplete="username"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
-                           text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500
-                           focus:ring-1 focus:ring-emerald-500 transition-colors"
+                className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm
+                           text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                             isTeacher
+                               ? 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                               : 'focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                           }`}
               />
             </div>
 
             {/* Password (Only in password mode) */}
             {loginMode === 'password' && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
                   Password
                 </label>
                 <div className="relative">
@@ -222,14 +328,17 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="current-password"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-10 text-sm
-                               text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500
-                               focus:ring-1 focus:ring-emerald-500 transition-colors"
+                    className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 pr-10 text-sm
+                               text-white placeholder-slate-600 focus:outline-none transition-colors ${
+                                 isTeacher
+                                   ? 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                                   : 'focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                               }`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPw((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
                   >
                     {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -237,45 +346,72 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* OTP Notice */}
             {loginMode === 'otp' && (
-              <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-                🔒 A single-use 6-digit verification code will be sent to your registered university email address.
+              <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-lg border border-slate-800">
+                🔒 A single-use 6-digit verification code will be sent to your registered university email address. Valid for 5 minutes.
               </p>
             )}
 
-            {/* Submit */}
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
-              className={`w-full flex items-center justify-center gap-2 font-bold py-2.5 rounded-lg transition-colors text-sm cursor-pointer ${
-                loginMode === 'otp'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/50'
+              className={`w-full flex items-center justify-center gap-2 font-bold py-2.5 rounded-lg transition-all text-sm cursor-pointer disabled:opacity-50 ${
+                isTeacher
+                  ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-950/50'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/50'
-              } disabled:opacity-50`}
+              }`}
             >
               {loading ? (
-                <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
               ) : loginMode === 'otp' ? (
                 <Mail className="w-4 h-4" />
               ) : (
                 <LogIn className="w-4 h-4" />
               )}
-              {loading
-                ? loginMode === 'otp'
-                  ? 'Sending OTP...'
-                  : 'Signing in…'
-                : loginMode === 'otp'
-                ? 'Send Login Code'
-                : 'Sign In'}
+              <span>
+                {loading
+                  ? loginMode === 'otp'
+                    ? 'Sending Verification Code...'
+                    : 'Signing In…'
+                  : loginMode === 'otp'
+                  ? 'Send Login Code'
+                  : isTeacher
+                  ? 'Sign In to Faculty Portal'
+                  : 'Sign In to Student Portal'}
+              </span>
             </button>
           </form>
+
+          {/* Quick Demo Hint */}
+          <div className="pt-2 text-[11px] text-slate-500 text-center border-t border-slate-800/80 flex items-center justify-center gap-1.5">
+            <span>Demo:</span>
+            {isTeacher ? (
+              <code className="text-purple-300 bg-purple-950/40 px-1.5 py-0.5 rounded">
+                teacher@amust.ac.bd / password123
+              </code>
+            ) : (
+              <code className="text-emerald-300 bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                student1@amust.ac.bd / password123
+              </code>
+            )}
+          </div>
         </div>
 
-        {/* Register link */}
-        <p className="text-center text-sm text-gray-400">
-          New student?{' '}
-          <Link to="/register" className="text-emerald-400 hover:text-emerald-300 font-semibold transition-colors">
-            Create an account
+        {/* Register Link */}
+        <p className="text-center text-xs text-slate-400">
+          {isTeacher ? 'New faculty member?' : 'New student?'}{' '}
+          <Link
+            to={`/register?role=${selectedRole.toLowerCase()}`}
+            className={`font-semibold transition-colors inline-flex items-center gap-1 ${
+              isTeacher
+                ? 'text-purple-400 hover:text-purple-300'
+                : 'text-emerald-400 hover:text-emerald-300'
+            }`}
+          >
+            <span>Create a {isTeacher ? 'teacher' : 'student'} account</span>
+            <ArrowRight className="w-3 h-3" />
           </Link>
         </p>
 

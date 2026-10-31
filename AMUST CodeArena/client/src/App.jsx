@@ -3,9 +3,10 @@
  * ────────
  * Root application component.
  *
- * Route protection:
- *   <ProtectedRoute>          — requires any authenticated user
- *   <ProtectedRoute role="TEACHER"> — requires TEACHER role, redirects others
+ * Route protection & Portal Separation (RBAC):
+ *   <ProtectedRoute>                     — requires any authenticated user
+ *   <ProtectedRoute allowedRoles={['STUDENT']}> — student portal only (teachers redirected to /teacher/dashboard)
+ *   <ProtectedRoute allowedRoles={['TEACHER']}> — teacher portal only (students redirected to /dashboard)
  */
 
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
@@ -19,7 +20,6 @@ import StudentDashboard  from './pages/StudentDashboard';
 import TeacherDashboard  from './pages/TeacherDashboard';
 import TeacherProblemEditor from './pages/TeacherProblemEditor';
 import ContestMonitor     from './pages/ContestMonitor';
-import TeacherAccessRequired from './pages/TeacherAccessRequired';
 import ProblemBankPage   from './pages/ProblemBankPage';
 import ProblemDetailPage from './pages/ProblemDetailPage';
 import ContestsHubPage         from './pages/ContestsHubPage';
@@ -40,17 +40,21 @@ const queryClient = new QueryClient({
 // ── Route guards ─────────────────────────────────────────────────────────
 
 /**
- * Redirects to /login while the session is loading.
- * Once loaded: if not authenticated → /login; if wrong role → /problems.
+ * Route protection wrapper:
+ *   - Checks authentication (redirects to /login if unauthenticated)
+ *   - Checks allowedRoles / role:
+ *     - If user is TEACHER attempting to access a student-only route -> redirect to /teacher/dashboard
+ *     - If user is STUDENT attempting to access a teacher-only route -> redirect to /dashboard
+ *     - ADMIN is allowed on all routes
  */
-function ProtectedRoute({ role }) {
+function ProtectedRoute({ allowedRoles, role }) {
   const { user, isLoading } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -59,11 +63,15 @@ function ProtectedRoute({ role }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (role && user.role !== role) {
-    if (role === 'TEACHER') {
-      return <TeacherAccessRequired />;
+  const roles = allowedRoles
+    ? (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles])
+    : (role ? [role] : null);
+
+  if (roles && !roles.includes(user.role) && user.role !== 'ADMIN') {
+    if (user.role === 'TEACHER') {
+      return <Navigate to="/teacher/dashboard" replace />;
     }
-    return <Navigate to="/problems" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Outlet />;
@@ -86,10 +94,6 @@ function AppShell() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      {/*
-        AuthProvider is inside QueryClientProvider so AuthContext can
-        invalidate queries (e.g., on logout) using the shared client.
-      */}
       <AuthProvider>
         <Routes>
           {/* Public routes — no Navbar, no auth required */}
@@ -100,18 +104,20 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
 
-              {/* Student & Problem routes */}
-              <Route path="/dashboard"    element={<StudentDashboard />} />
+              {/* Student Portal Protected Routes */}
+              <Route element={<ProtectedRoute allowedRoles={['STUDENT']} />}>
+                <Route path="/dashboard" element={<StudentDashboard />} />
+              </Route>
+
+              {/* Common problem & contest exploration (accessible by all authenticated users) */}
               <Route path="/problems"     element={<ProblemBankPage />} />
               <Route path="/problems/:id" element={<ProblemDetailPage />} />
-
-              {/* Contest routes */}
               <Route path="/contests"                   element={<ContestsHubPage />} />
               <Route path="/contests/:slug"             element={<ContestDetailPage />} />
               <Route path="/contests/:slug/leaderboard"  element={<ContestLeaderboardPage />} />
 
-              {/* Teacher-only routes */}
-              <Route element={<ProtectedRoute role="TEACHER" />}>
+              {/* Teacher Portal Protected Routes */}
+              <Route element={<ProtectedRoute allowedRoles={['TEACHER']} />}>
                 <Route path="/teacher" element={<TeacherDashboard />} />
                 <Route path="/teacher/dashboard" element={<TeacherDashboard />} />
                 <Route path="/teacher/problems/new" element={<TeacherProblemEditor />} />
@@ -120,7 +126,7 @@ export default function App() {
                 <Route path="/contests/:slug/monitor" element={<ContestMonitor />} />
               </Route>
 
-              {/* Default redirect */}
+              {/* Default role-based redirect */}
               <Route path="/" element={<RoleRedirect />} />
 
             </Route>
@@ -129,7 +135,7 @@ export default function App() {
             <Route path="/contests/:slug/arena" element={<ContestArenaPage />} />
           </Route>
 
-          {/* 404 */}
+          {/* 404 Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
@@ -137,12 +143,12 @@ export default function App() {
   );
 }
 
-/** Redirect / based on role. */
+/** Redirect / based on user role. */
 function RoleRedirect() {
   const { user } = useAuth();
   return (
     <Navigate
-      to={user?.role === 'TEACHER' ? '/teacher' : '/dashboard'}
+      to={user?.role === 'TEACHER' ? '/teacher/dashboard' : '/dashboard'}
       replace
     />
   );

@@ -68,8 +68,10 @@ export function AuthProvider({ children }) {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  const login = useCallback(async (identifier, password) => {
-    const { data } = await api.post('/auth/login', { identifier, password });
+  const login = useCallback(async (identifier, password, expectedRole) => {
+    const payload = { identifier, password };
+    if (expectedRole) payload.expectedRole = expectedRole;
+    const { data } = await api.post('/auth/login', payload);
     applyToken(data.accessToken, data.user);
     return data.user;
   }, [applyToken]);
