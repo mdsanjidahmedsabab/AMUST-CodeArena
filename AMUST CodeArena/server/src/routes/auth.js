@@ -177,7 +177,7 @@ async function handleRegisterOtp(req, res, next) {
     // Also dispatch OTP email in non-blocking background
     setImmediate(() => {
       sendOtpEmail({ to: email, otp, purpose: 'REGISTRATION' }).catch((err) => {
-        console.warn(`   ⚠️ [Registration OTP Dispatch Warning]: ${err.message}`);
+        console.error(`   ❌ [Registration OTP Dispatch Error]: ${err.message}`);
       });
     });
 
@@ -366,7 +366,7 @@ router.post('/forgot-password', authLimiter, async (req, res, next) => {
     // Send OTP via Gmail SMTP in background
     setImmediate(() => {
       sendOtpEmail({ to: email, otp, purpose: 'PASSWORD_RESET' }).catch((err) => {
-        console.warn(`   ⚠️ [Password Reset OTP Dispatch Warning]: ${err.message}`);
+        console.error(`   ❌ [Password Reset OTP Dispatch Error]: ${err.message}`);
       });
     });
 

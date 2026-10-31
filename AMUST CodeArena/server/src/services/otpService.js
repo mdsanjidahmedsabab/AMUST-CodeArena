@@ -83,31 +83,30 @@ export function maskEmail(email) {
 // ── Email Transporter Setup ──────────────────────────────────────────────────
 let mailTransporter = null;
 
-function getMailTransporter() {
+export function getMailTransporter() {
   if (mailTransporter) return mailTransporter;
 
   const user = process.env.SMTP_USER || process.env.EMAIL_USER;
   const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
-  const host =
-    process.env.SMTP_HOST ||
-    (user && user.includes('@gmail.com') ? 'smtp.gmail.com' : undefined);
-  const port = Number(process.env.SMTP_PORT) || 587;
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT) || 465;
+  const secure = (Number(process.env.SMTP_PORT) || 465) === 465;
 
   if (host && user && pass) {
     mailTransporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465,
-      auth: { user, pass },
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 8000,
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
+      secure,
+      auth: {
+        user,
+        pass,
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
   }
   return mailTransporter;
@@ -248,7 +247,7 @@ export async function sendOtpEmail({ to, otp, purpose }) {
   // Dispatch real email if SMTP transporter is configured
   if (transporter) {
     try {
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: fromAddr,
         to,
         replyTo: process.env.SMTP_REPLY_TO || fromAddr,
@@ -264,10 +263,23 @@ export async function sendOtpEmail({ to, otp, purpose }) {
           'X-Entity-Ref-ID': `${purpose}-${Date.now()}`,
         },
       });
-      console.log(`   ✅ [SMTP Dispatch Success]: Real OTP delivered to ${to}`);
+      console.log(`   ✅ [SMTP Dispatch Success]: Real OTP delivered to ${to} (Message ID: ${info?.messageId || 'sent'})`);
+      return { success: true, otp, messageId: info?.messageId };
     } catch (err) {
-      console.warn(`   ⚠️ [SMTP Dispatch Warning]: Could not send email via SMTP (${err.message}). Using console OTP.`);
+      console.error(`   ❌ [SMTP Dispatch Error]: Failed to deliver email to ${to} via SMTP: ${err.message}`, {
+        code: err.code,
+        command: err.command,
+        response: err.response,
+      });
+      throw new Error(`Could not send email via SMTP (${err.message})`);
     }
+  } else {
+    const errorMsg = 'SMTP transporter is not configured: Missing SMTP_USER or SMTP_PASS';
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`   ❌ [SMTP Configuration Error]: ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+    console.warn(`   ⚠️ [SMTP Dispatch Notice]: ${errorMsg}. Local dev OTP logged above.`);
   }
 
   return { success: true, otp };
@@ -349,7 +361,7 @@ export async function generateAndSendOtp({ email, purpose, payload = {} }) {
 
   setImmediate(() => {
     sendOtpEmail({ to: normEmail, otp, purpose }).catch((err) => {
-      console.warn('   ⚠️ [OTP Background Dispatch Warning]:', err.message);
+      console.error('   ❌ [OTP Background Dispatch Error]:', err.message);
     });
   });
 
