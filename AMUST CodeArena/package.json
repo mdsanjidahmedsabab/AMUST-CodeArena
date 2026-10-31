@@ -28,5 +28,8 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.6"
+  },
+  "dependencies": {
+    "@getbrevo/brevo": "^2.2.0"
   }
 }

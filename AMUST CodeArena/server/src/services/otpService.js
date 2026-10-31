@@ -22,9 +22,14 @@
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { getRedisClient } from '../config/redis.js';
-import { getMailTransporter, sendEmail } from './mailer.service.js';
+import {
+  getBrevoApiInstance,
+  getMailTransporter,
+  sendEmail,
+  sendOtpEmail as mailerSendOtpEmail,
+} from './mailer.service.js';
 
-export { getMailTransporter, sendEmail };
+export { getBrevoApiInstance, getMailTransporter, sendEmail };
 
 const OTP_TTL_SECONDS = 300; // 5 minutes
 const OTP_RATE_LIMIT_SECONDS = 600; // 10 minutes
@@ -84,150 +89,27 @@ export function maskEmail(email) {
 }
 
 /**
- * Sends stylized, anti-spam optimized HTML verification email with plaintext fallback.
+ * Sends OTP email via Brevo transactional email API (with fallback for local dev).
+ * Supports both signatures:
+ *   - sendOtpEmail({ to, otp, purpose })
+ *   - sendOtpEmail(email, otp)
  */
-export async function sendOtpEmail({ to, otp, purpose }) {
-  const masked = maskEmail(to);
-  const purposeLabel =
-    purpose === 'REGISTRATION'
-      ? 'Account Registration'
-      : purpose === 'PASSWORD_RESET'
-      ? 'Password Reset'
-      : 'Secure Login Verification';
-
-  const transporter = getMailTransporter();
-  const user = process.env.SMTP_USER || process.env.EMAIL_USER;
-
-  // Log to server console for local dev & testing transparency
-  console.log(`\n📨 [EMAIL OTP DISPATCH]`);
-  console.log(`   To: ${to} (${masked})`);
-  console.log(`   Purpose: ${purposeLabel}`);
-  console.log(`   OTP Code: ${otp}`);
-  console.log(`   Expires In: 5 minutes\n`);
+export async function sendOtpEmail(param1, param2, param3) {
+  let to, otp, purpose;
+  if (typeof param1 === 'object' && param1 !== null) {
+    to = param1.to || param1.email;
+    otp = param1.otp;
+    purpose = param1.purpose || 'REGISTRATION';
+  } else {
+    to = param1;
+    otp = param2;
+    purpose = param3 || 'REGISTRATION';
+  }
 
   devOtpLog.set(`${purpose}:${to.toLowerCase()}`, otp);
+  devOtpLog.set(to.toLowerCase(), otp);
 
-  // Professional sender format avoiding spam triggers
-  const fromAddr =
-    process.env.SMTP_FROM ||
-    (user ? `"AMUST CodeArena" <${user}>` : '"AMUST CodeArena" <support@amust.ac.bd>');
-
-  // Subject line strictly formatted for primary inbox placement
-  const subject =
-    purpose === 'PASSWORD_RESET'
-      ? `Your AMUST CodeArena Password Reset Code: ${otp}`
-      : `Your AMUST CodeArena Verification Code: ${otp}`;
-
-  // Plaintext fallback for mail clients and anti-spam scanners
-  const textContent = [
-    `Your AMUST CodeArena verification code is: ${otp}`,
-    '',
-    `This code is valid for 5 minutes. Enter this code to complete your ${purposeLabel.toLowerCase()}.`,
-    '',
-    'Security Notice:',
-    '- Do not share this verification code with anyone.',
-    '- AMUST faculty and administrators will never ask for your code.',
-    '- If you did not request this verification code, please ignore this email. Your account remains secure.',
-    '',
-    '—',
-    'AMUST CodeArena Platform',
-    'Ahsania Mission University of Science and Technology',
-  ].join('\n');
-
-  // Minimal, high-deliverability transactional HTML email
-  const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AMUST CodeArena Verification Code</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #030712; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #030712; padding: 32px 16px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 480px; background-color: #0f172a; border-radius: 12px; border: 1px solid #1e293b; overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);">
-          <!-- Header -->
-          <tr>
-            <td style="padding: 28px 32px 12px 32px; border-bottom: 1px solid #1e293b;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                <tr>
-                  <td>
-                    <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; letter-spacing: -0.02em;">
-                      AMUST <span style="color: #10b981;">CodeArena</span>
-                    </h1>
-                    <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; font-weight: 500;">
-                      Official Academic Online Judge & LMS
-                    </p>
-                  </td>
-                  <td align="right">
-                    <span style="display: inline-block; padding: 4px 10px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 9999px; font-size: 11px; font-weight: 600; color: #34d399;">
-                      ${purpose === 'PASSWORD_RESET' ? 'Password Reset' : 'OTP Verification'}
-                    </span>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <!-- Body -->
-          <tr>
-            <td style="padding: 28px 32px;">
-              <h2 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #ffffff;">
-                ${purposeLabel}
-              </h2>
-              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-                Use the following 6-digit one-time code to proceed with your AMUST CodeArena account verification:
-              </p>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 20px 0;">
-                <tr>
-                  <td align="center" style="background-color: #020617; border: 2px dashed #10b981; border-radius: 8px; padding: 20px 16px;">
-                    <div style="font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #10b981;">
-                      ${otp}
-                    </div>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin: 20px 0 8px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
-                ⏱️ This code is valid for <strong>5 minutes</strong> (300 seconds).
-              </p>
-              <p style="margin: 0 0 24px 0; font-size: 12px; line-height: 1.5; color: #64748b;">
-                For your security, never share this code with anyone. AMUST administrators will never ask for your verification code.
-              </p>
-              <div style="border-top: 1px solid #1e293b; padding-top: 16px;">
-                <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #64748b;">
-                  If you did not request this verification code, please ignore this email. No changes will be made to your account.
-                </p>
-              </div>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #090d16; padding: 16px 32px; border-top: 1px solid #1e293b; text-align: center;">
-              <p style="margin: 0; font-size: 11px; color: #475569;">
-                © 2026 Ahsania Mission University of Science and Technology (AMUST). All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
-  // Dispatch real email via mailer service
-  const mailResult = await sendEmail({
-    to,
-    from: fromAddr,
-    subject,
-    text: textContent,
-    html: htmlContent,
-    headers: {
-      'X-Entity-Ref-ID': `${purpose}-${Date.now()}`,
-    },
-  });
-
-  return { success: true, otp, messageId: mailResult?.messageId };
+  return mailerSendOtpEmail({ to, otp, purpose });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
