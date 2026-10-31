@@ -1,7 +1,7 @@
 /**
  * services/otpService.js
  * ──────────────────────
- * Secure Time-Limited Email OTP Service (Registration & 2FA / Passwordless Login).
+ * Secure Time-Limited Email OTP Service (Registration, Password Reset & 2FA).
  *
  * Security Invariants & Anti-Spam Deliverability Protections:
  *   1. Cryptographically secure 6-digit integer generation (crypto.randomInt).
@@ -9,14 +9,14 @@
  *   3. Redis storage with strict 300-second (5-minute) TTL and in-memory dual fallback.
  *   4. Strict rate limiting: Maximum 3 OTP requests per email per 10 minutes.
  *   5. Brute-force lockout: Maximum 5 incorrect verification attempts before immediate invalidation.
- *   6. Single-use: OTP record is instantly destroyed upon successful verification (replay attack prevention).
+ *   6. Single-use: OTP record is instantly destroyed upon successful verification.
  *   7. Nodemailer SMTP transporter optimized for Primary Inbox deliverability:
  *      - Professional sender identity (AMUST CodeArena <support@...>)
  *      - Direct subject line: "Your AMUST CodeArena Verification Code: [OTP]"
  *      - High text-to-HTML ratio, clean transactional HTML layout, zero spam buzzwords
  *      - Plaintext fallback (text: ...) alongside HTML
  *      - Transactional email headers (X-Priority: 1, Importance: high, Auto-Submitted)
- *      - Automatic dev/test console fallback and devOtp capture.
+ *      - Non-blocking asynchronous dispatch with strict 5-second socket timeouts.
  */
 
 import crypto from 'crypto';
@@ -35,13 +35,24 @@ const devOtpLog = new Map();
 
 /**
  * Creates SHA-256 hash of OTP with secret salt.
+ * @param {string} otp
+ * @param {string} email
+ * @returns {string}
  */
-function hashOtp(otp, email) {
+export function hashOtp(otp, email) {
   const salt = process.env.OTP_SECRET || process.env.JWT_SECRET || 'amust-codearena-otp-salt-key';
   return crypto
     .createHmac('sha256', salt)
     .update(`${email.toLowerCase()}:${otp}`)
     .digest('hex');
+}
+
+/**
+ * Generates a random cryptographic 32-byte hex token for password reset sessions.
+ * @returns {string}
+ */
+export function generateResetToken() {
+  return crypto.randomBytes(32).toString('hex');
 }
 
 /**
@@ -108,7 +119,12 @@ function getMailTransporter() {
 export async function sendOtpEmail({ to, otp, purpose }) {
   const masked = maskEmail(to);
   const purposeLabel =
-    purpose === 'REGISTRATION' ? 'Account Registration' : 'Secure Login Verification';
+    purpose === 'REGISTRATION'
+      ? 'Account Registration'
+      : purpose === 'PASSWORD_RESET'
+      ? 'Password Reset'
+      : 'Secure Login Verification';
+
   const transporter = getMailTransporter();
   const user = process.env.SMTP_USER || process.env.EMAIL_USER;
 
@@ -127,7 +143,10 @@ export async function sendOtpEmail({ to, otp, purpose }) {
     (user ? `"AMUST CodeArena" <${user}>` : '"AMUST CodeArena" <support@amust.ac.bd>');
 
   // Subject line strictly formatted for primary inbox placement
-  const subject = `Your AMUST CodeArena Verification Code: ${otp}`;
+  const subject =
+    purpose === 'PASSWORD_RESET'
+      ? `Your AMUST CodeArena Password Reset Code: ${otp}`
+      : `Your AMUST CodeArena Verification Code: ${otp}`;
 
   // Plaintext fallback for mail clients and anti-spam scanners
   const textContent = [
@@ -173,7 +192,7 @@ export async function sendOtpEmail({ to, otp, purpose }) {
                   </td>
                   <td align="right">
                     <span style="display: inline-block; padding: 4px 10px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 9999px; font-size: 11px; font-weight: 600; color: #34d399;">
-                      OTP Verification
+                      ${purpose === 'PASSWORD_RESET' ? 'Password Reset' : 'OTP Verification'}
                     </span>
                   </td>
                 </tr>
@@ -183,13 +202,12 @@ export async function sendOtpEmail({ to, otp, purpose }) {
           <!-- Body -->
           <tr>
             <td style="padding: 28px 32px;">
-              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-                Hello,
-              </p>
+              <h2 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #ffffff;">
+                ${purposeLabel}
+              </h2>
               <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-                Use the following 6-digit verification code to complete your <strong>${purposeLabel.toLowerCase()}</strong> on AMUST CodeArena:
+                Use the following 6-digit one-time code to proceed with your AMUST CodeArena account verification:
               </p>
-              <!-- Verification Code Display -->
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 20px 0;">
                 <tr>
                   <td align="center" style="background-color: #020617; border: 2px dashed #10b981; border-radius: 8px; padding: 20px 16px;">
@@ -264,9 +282,9 @@ export async function sendOtpEmail({ to, otp, purpose }) {
  *
  * @param {object} params
  * @param {string} params.email
- * @param {'REGISTRATION'|'LOGIN'} params.purpose
+ * @param {'REGISTRATION'|'LOGIN'|'PASSWORD_RESET'} params.purpose
  * @param {object} [params.payload={}]
- * @returns {Promise<{ success: boolean, maskedEmail: string, expiresInSeconds: number, devOtp?: string }>}
+ * @returns {Promise<{ success: boolean, message: string, maskedEmail: string, expiresInSeconds: number, devOtp?: string }>}
  */
 export async function generateAndSendOtp({ email, purpose, payload = {} }) {
   const normEmail = email.toLowerCase().trim();
@@ -320,14 +338,15 @@ export async function generateAndSendOtp({ email, purpose, payload = {} }) {
     await redis.set(otpStorageKey, JSON.stringify(otpRecord), 'EX', OTP_TTL_SECONDS);
   } else {
     inMemoryStore.set(otpStorageKey, otpRecord);
-    // Auto-evict after 300s
     setTimeout(() => {
       inMemoryStore.delete(otpStorageKey);
     }, OTP_TTL_SECONDS * 1000).unref?.();
   }
 
-  // 4. Dispatch Email or Log to Console
-  // 4. Dispatch Email or Log to Console (Non-blocking queue/background dispatch)
+  // 4. Non-blocking queue / background dispatch to eliminate HTTP latency
+  devOtpLog.set(`${purpose}:${normEmail}`, otp);
+  devOtpLog.set(normEmail, otp);
+
   setImmediate(() => {
     sendOtpEmail({ to: normEmail, otp, purpose }).catch((err) => {
       console.warn('   ⚠️ [OTP Background Dispatch Warning]:', err.message);
@@ -336,6 +355,7 @@ export async function generateAndSendOtp({ email, purpose, payload = {} }) {
 
   const result = {
     success: true,
+    message: 'OTP sent successfully',
     maskedEmail: maskEmail(normEmail),
     expiresInSeconds: OTP_TTL_SECONDS,
   };
@@ -354,7 +374,7 @@ export async function generateAndSendOtp({ email, purpose, payload = {} }) {
  *
  * @param {object} params
  * @param {string} params.email
- * @param {'REGISTRATION'|'LOGIN'} params.purpose
+ * @param {'REGISTRATION'|'LOGIN'|'PASSWORD_RESET'} params.purpose
  * @param {string} params.candidateOtp
  * @returns {Promise<{ valid: boolean, payload?: any, error?: string, attemptsRemaining?: number }>}
  */
@@ -412,7 +432,6 @@ export async function verifyOtp({ email, purpose, candidateOtp }) {
     record.attemptsRemaining -= 1;
 
     if (record.attemptsRemaining <= 0) {
-      // Invalidate on final wrong attempt
       if (redisAvailable) await redis.del(otpStorageKey);
       else inMemoryStore.delete(otpStorageKey);
 
@@ -423,7 +442,6 @@ export async function verifyOtp({ email, purpose, candidateOtp }) {
       };
     }
 
-    // Persist decremented attempts remaining with current TTL
     if (redisAvailable) {
       const ttl = await redis.ttl(otpStorageKey);
       if (ttl > 0) {
@@ -440,7 +458,7 @@ export async function verifyOtp({ email, purpose, candidateOtp }) {
     };
   }
 
-  // 5. Successful Verification -> Single-Use Invalidation (Delete record)
+  // 5. Successful Verification -> Single-Use Invalidation
   if (redisAvailable) {
     await redis.del(otpStorageKey);
   } else {
@@ -456,10 +474,27 @@ export async function verifyOtp({ email, purpose, candidateOtp }) {
 }
 
 /**
+ * Records an active development OTP for automated testing.
+ */
+export function recordDevOtp(purpose, email, otp) {
+  const norm = email.toLowerCase().trim();
+  devOtpLog.set(`${purpose}:${norm}`, otp);
+  devOtpLog.set(norm, otp);
+}
+
+/**
  * Retrieves the active development OTP for automated testing.
  */
 export function getDevOtp(email, purpose) {
-  return devOtpLog.get(`${purpose}:${email.toLowerCase().trim()}`) || null;
+  const norm = email.toLowerCase().trim();
+  if (purpose) {
+    return devOtpLog.get(`${purpose}:${norm}`) || devOtpLog.get(norm) || null;
+  }
+  if (devOtpLog.has(norm)) return devOtpLog.get(norm);
+  for (const [k, v] of devOtpLog.entries()) {
+    if (k.endsWith(`:${norm}`)) return v;
+  }
+  return null;
 }
 
 /**
@@ -472,13 +507,16 @@ export async function clearOtpDataForEmail(email) {
 
   inMemoryStore.delete(`otp:REGISTRATION:${normEmail}`);
   inMemoryStore.delete(`otp:LOGIN:${normEmail}`);
+  inMemoryStore.delete(`otp:PASSWORD_RESET:${normEmail}`);
   inMemoryRateLimit.delete(normEmail);
   devOtpLog.delete(`REGISTRATION:${normEmail}`);
   devOtpLog.delete(`LOGIN:${normEmail}`);
+  devOtpLog.delete(`PASSWORD_RESET:${normEmail}`);
 
   if (redisAvailable) {
     await redis.del(`otp:REGISTRATION:${normEmail}`);
     await redis.del(`otp:LOGIN:${normEmail}`);
+    await redis.del(`otp:PASSWORD_RESET:${normEmail}`);
     await redis.del(`otp_rate:${normEmail}`);
   }
 }

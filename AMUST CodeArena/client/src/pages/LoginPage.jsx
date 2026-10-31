@@ -1,12 +1,8 @@
 /**
  * pages/LoginPage.jsx
  * ────────────────────
- * Standard Unified Email/Password Authentication Page with Role-Based Portal Switcher.
- * Supports:
- *   - Role selection: "Student Portal" vs "Teacher Portal"
- *   - Routine flow: Standard Email / University ID + Password (No OTP required during login)
- *   - Strict redirection: STUDENT -> /dashboard, TEACHER -> /teacher/dashboard
- *   - Super Admin bypass for sababsanjid2@gmail.com
+ * Standard Unified Email/Password Authentication Page with Role-Based Portal Switcher
+ * and Complete 3-Step Forgot Password Flow.
  */
 
 import { useState } from 'react';
@@ -20,6 +16,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import ArenaLogo from '../components/ArenaLogo';
+import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginPage() {
@@ -36,6 +33,9 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Forgot password modal state
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
 
   const isTeacher = selectedRole === 'TEACHER';
 
@@ -199,11 +199,22 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Password */}
+            {/* Password + Forgot Password Link */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                Password
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsForgotOpen(true)}
+                  className={`text-xs transition-colors cursor-pointer hover:underline ${
+                    isTeacher ? 'text-purple-400 hover:text-purple-300' : 'text-emerald-400 hover:text-emerald-300'
+                  }`}
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
@@ -285,6 +296,13 @@ export default function LoginPage() {
         </p>
 
       </div>
+
+      {/* 3-Step Forgot Password Modal */}
+      <ForgotPasswordModal
+        isOpen={isForgotOpen}
+        onClose={() => setIsForgotOpen(false)}
+        initialEmail={identifier.includes('@') ? identifier.trim() : ''}
+      />
     </div>
   );
 }

@@ -103,10 +103,10 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/register-init', {
-        name: form.name.trim(),
+      const { data } = await api.post('/auth/register-otp', {
+        fullName: form.name.trim(),
         email: form.email.trim().toLowerCase(),
-        universityId: form.universityId.trim() || undefined,
+        studentId: form.universityId.trim() || undefined,
         password: form.password,
         role: selectedRole,
       });
@@ -132,7 +132,7 @@ export default function RegisterPage() {
   async function handleVerifyOtp(otp) {
     setOtpModal((prev) => ({ ...prev, loading: true, error: '' }));
     try {
-      const { data } = await api.post('/auth/register-verify', {
+      const { data } = await api.post('/auth/verify-registration', {
         email: otpModal.email,
         otp,
       });
@@ -176,10 +176,10 @@ export default function RegisterPage() {
   // Resend OTP handler inside modal
   async function handleResendOtp() {
     try {
-      const { data } = await api.post('/auth/register-init', {
-        name: form.name.trim(),
+      const { data } = await api.post('/auth/register-otp', {
+        fullName: form.name.trim(),
         email: form.email.trim().toLowerCase(),
-        universityId: form.universityId.trim() || undefined,
+        studentId: form.universityId.trim() || undefined,
         password: form.password,
         role: selectedRole,
       });
