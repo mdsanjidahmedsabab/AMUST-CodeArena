@@ -763,6 +763,10 @@ export async function submitViaHeadlessBrowser({
         ]);
       }
 
+      // Settle briefly to allow navigation/redirect to register
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 3000 }).catch(() => {});
+      await page.waitForSelector('tr[data-submission-id]', { timeout: 3000 }).catch(() => {});
+
       const finalUrl = page.url();
       const pageBody = await page.content();
 
@@ -774,23 +778,115 @@ export async function submitViaHeadlessBrowser({
         throw new Error('Codeforces rejected: Source code is empty.');
       }
 
+      // 1. Inspect redirect URL for submission ID
       const match = finalUrl.match(/submission\/(\d+)/);
       let remoteSubmissionId = match ? Number(match[1]) : null;
 
-      // Fallback: Query official API for latest submission if handle is known
-      if (!remoteSubmissionId && handle && handle !== 'cookie_user' && handle !== 'cf_injected_session') {
+      // 2. Detect the logged-in handle from page header or profile links
+      const loggedInHandle = await page.evaluate(() => {
+        const link = document.querySelector('#header a[href^="/profile/"], a[href^="/profile/"]');
+        if (link) {
+          const href = link.getAttribute('href') || '';
+          const m = href.match(/\/profile\/([^\/\?#]+)/);
+          return m ? m[1].trim() : link.textContent.trim();
+        }
+        return null;
+      }).catch(() => null);
+
+      const effectiveHandle = loggedInHandle ||
+        (handle && !['cookie_user', 'cf_injected_session', 'mock_cf_bot'].includes(handle) ? handle : null) ||
+        process.env.DEFAULT_CF_BOT_HANDLE ||
+        process.env.CF_BOT_HANDLE;
+
+      // 3. Inspect status/submissions table rows on the redirected page (e.g. /my or /status?my)
+      if (!remoteSubmissionId) {
+        try {
+          remoteSubmissionId = await page.evaluate((cId, pIdx) => {
+            const rows = document.querySelectorAll('tr[data-submission-id]');
+            if (!rows || rows.length === 0) return null;
+
+            const targetCode = `${cId}${pIdx}`.toUpperCase();
+            for (const row of rows) {
+              const subId = row.getAttribute('data-submission-id');
+              if (!subId) continue;
+              const text = (row.innerText || '').toUpperCase();
+              if (
+                text.includes(targetCode) ||
+                (text.includes(String(cId)) && text.includes(String(pIdx).toUpperCase())) ||
+                row.querySelector(`a[href*="/problem/${cId}/${pIdx}"]`) ||
+                row.querySelector(`a[href*="/problem/${pIdx}"]`)
+              ) {
+                return Number(subId);
+              }
+            }
+            const firstId = rows[0].getAttribute('data-submission-id');
+            return firstId ? Number(firstId) : null;
+          }, contestId, problemIndex);
+          if (remoteSubmissionId) {
+            console.log(`[Codeforces Browser Worker] Captured submission ID ${remoteSubmissionId} from redirected page table.`);
+          }
+        } catch (_) {}
+      }
+
+      // 4. If still not found and effectiveHandle is known, navigate to https://codeforces.com/submissions/${handle}
+      if (!remoteSubmissionId && effectiveHandle) {
+        try {
+          console.log(`[Codeforces Browser Worker] Checking submissions page: https://codeforces.com/submissions/${effectiveHandle}...`);
+          await page.goto(`https://codeforces.com/submissions/${encodeURIComponent(effectiveHandle)}`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 10000,
+          });
+          await page.waitForSelector('tr[data-submission-id]', { timeout: 3000 }).catch(() => {});
+
+          remoteSubmissionId = await page.evaluate((cId, pIdx) => {
+            const rows = document.querySelectorAll('tr[data-submission-id]');
+            if (!rows || rows.length === 0) return null;
+
+            const targetCode = `${cId}${pIdx}`.toUpperCase();
+            for (const row of rows) {
+              const subId = row.getAttribute('data-submission-id');
+              if (!subId) continue;
+              const text = (row.innerText || '').toUpperCase();
+              if (
+                text.includes(targetCode) ||
+                (text.includes(String(cId)) && text.includes(String(pIdx).toUpperCase())) ||
+                row.querySelector(`a[href*="/problem/${cId}/${pIdx}"]`) ||
+                row.querySelector(`a[href*="/problem/${pIdx}"]`)
+              ) {
+                return Number(subId);
+              }
+            }
+            const firstId = rows[0].getAttribute('data-submission-id');
+            return firstId ? Number(firstId) : null;
+          }, contestId, problemIndex);
+
+          if (remoteSubmissionId) {
+            console.log(`[Codeforces Browser Worker] Captured submission ID ${remoteSubmissionId} from user submissions page.`);
+          }
+        } catch (subErr) {
+          console.warn(`[Codeforces Browser Worker] Submissions page check note:`, subErr.message);
+        }
+      }
+
+      // 5. Fallback: Query official API for latest submission if handle is known
+      if (!remoteSubmissionId && effectiveHandle) {
         try {
           await cfLimiter.throttle();
           const statusRes = await axios.get(
-            `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
+            `https://codeforces.com/api/user.status?handle=${encodeURIComponent(effectiveHandle)}&from=1&count=5`,
             { timeout: 10000, headers: DEFAULT_BROWSER_HEADERS }
           );
           if (statusRes.data?.status === 'OK' && Array.isArray(statusRes.data.result) && statusRes.data.result.length > 0) {
-            const found = statusRes.data.result.find(
-              (s) => s.contestId === contestId && s.problem?.index === problemIndex
-            ) || statusRes.data.result[0];
-            if (found) {
+            const targetCode = `${contestId}${problemIndex}`.toUpperCase();
+            const found = statusRes.data.result.find((s) => {
+              const sContest = String(s.contestId || '');
+              const sIndex = String(s.problem?.index || '').toUpperCase();
+              return (sContest === String(contestId) && sIndex === String(problemIndex).toUpperCase()) ||
+                     (`${sContest}${sIndex}` === targetCode);
+            }) || statusRes.data.result[0];
+            if (found?.id) {
               remoteSubmissionId = found.id;
+              console.log(`[Codeforces Browser Worker] Captured submission ID ${remoteSubmissionId} via user.status API.`);
             }
           }
         } catch (_) {}
@@ -800,6 +896,7 @@ export async function submitViaHeadlessBrowser({
         remoteSubmissionId,
         submitted: true,
         csrfToken: pageCsrfToken,
+        handle: effectiveHandle || handle,
       };
     })();
 
@@ -1034,15 +1131,27 @@ export async function submitToCodeforces({
   const finalLocation = submitRes.headers?.location || submitRes.request?.res?.responseUrl || '';
   const matchId = finalLocation.match(/submission\/(\d+)/);
   if (matchId) {
-    return { remoteSubmissionId: Number(matchId[1]) };
+    return { remoteSubmissionId: Number(matchId[1]), submitted: true, handle };
   }
 
+  // Check response body for submission ID table rows
+  if (typeof submitRes.data === 'string') {
+    const rowMatch = submitRes.data.match(/data-submission-id=["'](\d+)["']/i);
+    if (rowMatch) {
+      return { remoteSubmissionId: Number(rowMatch[1]), submitted: true, handle };
+    }
+  }
+
+  const effectiveHandle = (handle && !['cf_injected_session', 'cf_authenticated_user', 'cookie_user'].includes(handle))
+    ? handle
+    : (process.env.DEFAULT_CF_BOT_HANDLE || process.env.CF_BOT_HANDLE || null);
+
   // Fallback: Query official API for latest submission by this handle
-  if (handle && handle !== 'cf_injected_session' && handle !== 'cf_authenticated_user' && handle !== 'cookie_user') {
+  if (effectiveHandle) {
     await cfLimiter.throttle();
     try {
       const statusRes = await axios.get(
-        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
+        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(effectiveHandle)}&from=1&count=5`,
         {
           timeout: 10000,
           headers: DEFAULT_BROWSER_HEADERS,
@@ -1050,27 +1159,31 @@ export async function submitToCodeforces({
       );
 
       if (statusRes.data?.status === 'OK' && Array.isArray(statusRes.data.result) && statusRes.data.result.length > 0) {
-        const match = statusRes.data.result.find(
-          (s) => s.contestId === contestId && s.problem?.index === problemIndex
-        ) || statusRes.data.result[0];
+        const targetCode = `${contestId}${problemIndex}`.toUpperCase();
+        const matchSub = statusRes.data.result.find((s) => {
+          const sContest = String(s.contestId || '');
+          const sIndex = String(s.problem?.index || '').toUpperCase();
+          return (sContest === String(contestId) && sIndex === String(problemIndex).toUpperCase()) ||
+                 (`${sContest}${sIndex}` === targetCode);
+        }) || statusRes.data.result[0];
 
-        return { remoteSubmissionId: match.id };
+        return { remoteSubmissionId: matchSub.id, submitted: true, handle: effectiveHandle };
       }
     } catch (apiErr) {
       console.warn(`[Codeforces Worker] user.status query note: ${apiErr.message}`);
     }
   }
 
-  if (finalLocation.includes('/my') || finalLocation.includes('/status')) {
-    return { remoteSubmissionId: null, submitted: true };
+  if (finalLocation.includes('/my') || finalLocation.includes('/status') || finalLocation.includes('/submissions')) {
+    return { remoteSubmissionId: null, submitted: true, handle: effectiveHandle || handle };
   }
 
-  throw new Error('Codeforces submission was posted but submission ID could not be retrieved');
+  return { remoteSubmissionId: null, submitted: true, handle: effectiveHandle || handle };
 }
 
 /**
  * Polls Codeforces API for real-time verdict and metrics.
- * Polls https://codeforces.com/api/user.status?handle=${handle}&from=1&count=5 every 2 seconds.
+ * Polls https://codeforces.com/api/user.status?handle=${handle}&from=1&count=5 every 3 seconds up to safe 90s window.
  *
  * @param {object} params
  * @param {string} params.handle
@@ -1079,7 +1192,7 @@ export async function submitToCodeforces({
  * @param {string} [params.problemIndex]
  * @param {Function} [params.onProgress] Callback with { state, currentTestcase, totalTestcases, timeMs, memoryKb }
  * @param {number} [params.maxAttempts=30]
- * @param {number} [params.pollIntervalMs=2000]
+ * @param {number} [params.pollIntervalMs=3000]
  * @param {boolean} [params.dryRun=false]
  * @returns {Promise<object>}
  */
@@ -1090,7 +1203,7 @@ export async function pollCodeforcesVerdict({
   problemIndex,
   onProgress = () => {},
   maxAttempts = 30,
-  pollIntervalMs = 2000,
+  pollIntervalMs = 3000,
   dryRun = false,
 }) {
   // Explicit Dry-Run / Mock Simulation Mode
@@ -1122,14 +1235,38 @@ export async function pollCodeforcesVerdict({
     };
   }
 
-  // Live Codeforces API Polling Loop (Poll every 2 seconds)
+  const effectiveHandle = (handle && !['cookie_user', 'cf_injected_session', 'cf_authenticated_user'].includes(handle))
+    ? handle
+    : (process.env.DEFAULT_CF_BOT_HANDLE || process.env.CF_BOT_HANDLE || null);
+
+  if (!effectiveHandle) {
+    console.warn(`[Codeforces Worker] No valid handle available to poll user.status. Returning PENDING.`);
+    return {
+      remoteSubmissionId: remoteSubmissionId || null,
+      verdict: 'PENDING',
+      verdictShort: 'PENDING',
+      timeMs: 0,
+      memoryKb: 0,
+      testcasesPassed: 0,
+      totalTestcases: 1,
+      rawVerdict: 'TESTING',
+      state: 'Evaluating on Codeforces',
+      isPending: true,
+      error: null,
+    };
+  }
+
+  const targetCode = (contestId && problemIndex) ? `${contestId}${problemIndex}`.toUpperCase() : null;
+  let lastObservedSubmission = null;
+
+  // Live Codeforces API Polling Loop (Poll every 3 seconds up to safe 90s window)
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     await cfLimiter.throttle();
 
     try {
       const response = await axios.get(
-        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
+        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(effectiveHandle)}&from=1&count=5`,
         {
           timeout: 10000,
           headers: DEFAULT_BROWSER_HEADERS,
@@ -1140,38 +1277,73 @@ export async function pollCodeforcesVerdict({
         continue;
       }
 
-      // Match submission by ID or by contestId + problemIndex
-      const submission = response.data.result.find(
-        (s) => s.id === remoteSubmissionId || (contestId && s.contestId === contestId && s.problem?.index === problemIndex)
-      );
+      const submissions = response.data.result;
+
+      // Match submission:
+      // 1. By exact remoteSubmissionId
+      // 2. By contestId and problemIndex
+      // 3. By combined problem code (e.g. 2267B)
+      // 4. By recent submission within 10 minutes matching problem
+      let submission = null;
+      if (remoteSubmissionId) {
+        submission = submissions.find((s) => s.id === remoteSubmissionId);
+      }
+
+      if (!submission && contestId && problemIndex) {
+        submission = submissions.find((s) => {
+          const sContest = String(s.contestId || '');
+          const sIndex = String(s.problem?.index || '').toUpperCase();
+          const targetContest = String(contestId);
+          const targetIndex = String(problemIndex).toUpperCase();
+
+          if (sContest === targetContest && sIndex === targetIndex) return true;
+          if (targetCode && `${sContest}${sIndex}` === targetCode) return true;
+          return false;
+        });
+      }
+
+      if (!submission && !remoteSubmissionId && submissions.length > 0) {
+        const latest = submissions[0];
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (latest.creationTimeSeconds && (nowSec - latest.creationTimeSeconds < 600)) {
+          submission = latest;
+        }
+      }
 
       if (!submission) {
         continue;
       }
 
+      lastObservedSubmission = submission;
+      const currentSubId = submission.id;
       const rawVerdict = submission.verdict;
       const passedTestCount = submission.passedTestCount || 0;
       const timeMs = submission.timeConsumedMillis || 0;
       const memoryKb = Math.round((submission.memoryConsumedBytes || 0) / 1024);
 
-      // Intermediate State (Testing in progress)
-      if (!rawVerdict || rawVerdict === 'TESTING') {
+      // Intermediate / Queued / Testing in progress
+      if (!rawVerdict || rawVerdict === 'TESTING' || rawVerdict === 'SUBMITTED' || rawVerdict === 'IN_QUEUE') {
+        const testNum = passedTestCount + 1;
+        const stateText = (!rawVerdict || rawVerdict === 'SUBMITTED' || rawVerdict === 'IN_QUEUE')
+          ? 'In Queue on Codeforces'
+          : `Running on test ${testNum}`;
+
         onProgress({
-          state: `Running on test ${passedTestCount + 1}`,
-          currentTestcase: passedTestCount + 1,
-          totalTestcases: Math.max(passedTestCount + 1, 10),
+          state: stateText,
+          currentTestcase: testNum,
+          totalTestcases: Math.max(testNum, 10),
           timeMs,
           memoryKb,
         });
         continue;
       }
 
-      // Terminal Verdict reached
+      // Terminal Verdict reached!
       const mapped = CF_VERDICT_MAP[rawVerdict] || { verdict: 'RUNTIME_ERROR', verdictShort: 'RTE' };
       const totalTestcases = passedTestCount + (mapped.verdict === 'ACCEPTED' ? 0 : 1);
 
       return {
-        remoteSubmissionId: submission.id,
+        remoteSubmissionId: currentSubId,
         verdict: mapped.verdict,
         verdictShort: mapped.verdictShort,
         timeMs,
@@ -1186,8 +1358,29 @@ export async function pollCodeforcesVerdict({
     }
   }
 
-  // Polling timeout: surface real failure error rather than artificial "Accepted"
-  throw new Error(`Codeforces evaluation timed out after ${maxAttempts * (pollIntervalMs / 1000)} seconds of polling`);
+  // Polling timeout reached (90s) but submission accepted: Return PENDING so the UI continues evaluating
+  const resolvedSubId = lastObservedSubmission?.id || remoteSubmissionId;
+  const passedCount = lastObservedSubmission?.passedTestCount || 0;
+  const finalTimeMs = lastObservedSubmission?.timeConsumedMillis || 0;
+  const finalMemoryKb = Math.round((lastObservedSubmission?.memoryConsumedBytes || 0) / 1024);
+
+  console.warn(
+    `[Codeforces Worker] Polling reached ${maxAttempts * (pollIntervalMs / 1000)}s timeout for submission ${resolvedSubId || 'unknown'}. Submission accepted by Codeforces but still in evaluation. Returning PENDING status.`
+  );
+
+  return {
+    remoteSubmissionId: resolvedSubId || null,
+    verdict: 'PENDING',
+    verdictShort: 'PENDING',
+    timeMs: finalTimeMs,
+    memoryKb: finalMemoryKb,
+    testcasesPassed: passedCount,
+    totalTestcases: Math.max(passedCount + 1, 10),
+    rawVerdict: lastObservedSubmission?.verdict || 'TESTING',
+    state: 'Evaluating on Codeforces',
+    isPending: true,
+    error: null,
+  };
 }
 
 export default {

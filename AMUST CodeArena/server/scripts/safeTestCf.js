@@ -97,6 +97,9 @@ int main() {
 
     console.log('\n[Step 2/3] Submission completed successfully!');
     console.log(` - Remote Submission ID: ${runResult?.remoteSubmissionId || 'Queued / Extracted'}`);
+    if (runResult?.handle) {
+      console.log(` - Effective Account Handle: ${runResult.handle}`);
+    }
     if (runResult?.csrfToken) {
       console.log(` - Harvested CSRF Token: ${runResult.csrfToken.slice(0, 8)}...`);
     }

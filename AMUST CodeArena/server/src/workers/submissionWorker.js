@@ -214,8 +214,8 @@ export async function processSubmissionJob(submissionId) {
       },
     });
 
-    // 6. Update Contest Scoreboard (if applicable)
-    if (submission.contestId) {
+    // 6. Update Contest Scoreboard (if applicable and terminal)
+    if (submission.contestId && judgeResult.verdict !== 'PENDING') {
       await updateContestScoreboard(
         submission.contestId,
         submission.userId,
@@ -226,8 +226,9 @@ export async function processSubmissionJob(submissionId) {
     }
 
     // 7. Broadcast Final Completed State via SSE
+    const isPending = judgeResult.verdict === 'PENDING';
     const finalPayload = {
-      state: 'Done',
+      state: isPending ? 'Evaluating on Codeforces' : 'Done',
       verdict: updated.verdict,
       verdictShort: judgeResult.verdictShort,
       timeMs: updated.timeMs,

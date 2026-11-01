@@ -31,6 +31,7 @@ import {
   authenticateCodeforcesSession,
   CF_PROGRAM_TYPE_IDS,
   CF_VERDICT_MAP,
+  pollCodeforcesVerdict,
 } from '../src/services/remoteJudge/codeforcesWorker.js';
 import {
   resolveCredentials,
@@ -326,6 +327,30 @@ async function runTests() {
   assert.equal(cachedState.state, 'Done');
   assert.equal(cachedState.verdict, 'ACCEPTED');
   console.log('   ✅ Full asynchronous evaluation pipeline updated PostgreSQL and broadcasted SSE state.');
+
+  // ─────────────────────────────────────────────────────────────
+  // 7. Resilient Verdict Polling & PENDING Fallback Tests
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n🧪 7. Testing Resilient Poller & PENDING Timeout Fallback...');
+
+  const progressEvents = [];
+  const timeoutPollResult = await pollCodeforcesVerdict({
+    handle: 'mock_timeout_bot',
+    remoteSubmissionId: 777123456,
+    contestId: 2267,
+    problemIndex: 'B',
+    onProgress: (p) => progressEvents.push(p),
+    maxAttempts: 2,
+    pollIntervalMs: 50,
+  });
+
+  assert.ok(timeoutPollResult, 'Poll result must be defined');
+  assert.equal(timeoutPollResult.remoteSubmissionId, 777123456);
+  assert.equal(timeoutPollResult.verdict, 'PENDING', 'Timed-out polling must yield PENDING verdict, never RTE crash');
+  assert.equal(timeoutPollResult.verdictShort, 'PENDING');
+  assert.equal(timeoutPollResult.isPending, true);
+  assert.equal(timeoutPollResult.error, null);
+  console.log('   ✅ Polling timeout gracefully resolves to PENDING without triggering RTE exception.');
 
   console.log('\n🎉 ALL CODEFORCES REMOTE JUDGE & DISPATCHER TESTS PASSED! (100% SUCCESS)\n');
 

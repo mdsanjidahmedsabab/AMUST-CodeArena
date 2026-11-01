@@ -173,9 +173,10 @@ export async function dispatchSubmission({
       totalTestcases: 1,
     });
 
+    let submitResult = null;
     try {
       // Submit solution via Codeforces worker
-      const submitResult = await submitToCodeforces({
+      submitResult = await submitToCodeforces({
         handle: effectiveHandle,
         password: effectivePassword,
         contestId,
@@ -186,6 +187,7 @@ export async function dispatchSubmission({
       });
 
       const remoteSubmissionId = submitResult.remoteSubmissionId;
+      const pollingHandle = submitResult.handle || effectiveHandle;
 
       // Broadcast evaluating step
       onProgress({
@@ -194,13 +196,15 @@ export async function dispatchSubmission({
         totalTestcases: 10,
       });
 
-      // Poll Codeforces API for verdict and execution metrics (every 2 seconds)
+      // Poll Codeforces API for verdict and execution metrics (every 3 seconds, up to 90 seconds)
       const verdictResult = await pollCodeforcesVerdict({
-        handle: effectiveHandle,
+        handle: pollingHandle,
         remoteSubmissionId,
         contestId,
         problemIndex,
         onProgress,
+        maxAttempts: 30,
+        pollIntervalMs: 3000,
         dryRun: shouldDryRun,
       });
 
@@ -211,19 +215,40 @@ export async function dispatchSubmission({
         memoryKb: verdictResult.memoryKb || 0,
         testcasesPassed: verdictResult.testcasesPassed || 0,
         totalTestcases: verdictResult.totalTestcases || 1,
-        remoteSubmissionId,
+        remoteSubmissionId: verdictResult.remoteSubmissionId || remoteSubmissionId,
         isRemote: true,
         remoteOj: 'CODEFORCES',
-        dispatchedHandle: effectiveHandle,
+        dispatchedHandle: pollingHandle,
         isPersonalAccount: credentials.isPersonal,
         isDefaultBot: credentials.isDefaultBot,
         error: truncateOutput(verdictResult.error),
+        isPending: verdictResult.isPending || verdictResult.verdict === 'PENDING',
       };
     } catch (err) {
       console.error(
         `[Remote Dispatcher] Live Codeforces submission failed for handle "${effectiveHandle}":`,
         err.message
       );
+      // Fallback: If polling or submission timed out after successful dispatch, do NOT mark as RTE
+      const isTimeout = /time(d)?\s*out/i.test(err.message);
+      if (isTimeout && (submitResult?.submitted || submitResult?.remoteSubmissionId)) {
+        return {
+          verdict: 'PENDING',
+          verdictShort: 'PENDING',
+          timeMs: 0,
+          memoryKb: 0,
+          testcasesPassed: 0,
+          totalTestcases: 1,
+          remoteSubmissionId: submitResult?.remoteSubmissionId || null,
+          isRemote: true,
+          remoteOj: 'CODEFORCES',
+          dispatchedHandle: submitResult?.handle || effectiveHandle,
+          isPersonalAccount: credentials.isPersonal,
+          isDefaultBot: credentials.isDefaultBot,
+          error: null,
+          isPending: true,
+        };
+      }
       // Surface EXACT error to server logs and return the real failure rather than an artificial "Accepted" verdict
       return {
         verdict: 'RUNTIME_ERROR',
