@@ -209,7 +209,7 @@ async function main() {
     console.log(`      • Testcases Passed   : ${resultB.testcasesPassed}/${resultB.totalTestcases}`);
     console.log(`      • Total Wall Time    : ${elapsedB} ms`);
     console.log(`      • Pipeline History   : ${scenarioBStates.join(' ➔ ')}`);
-    console.log('   ✅ SCENARIO B VERIFIED: Successfully routed bound student under personal handle with AES-256 decryption & 403 resilience.\n');
+    console.log('   ✅ SCENARIO B VERIFIED: Successfully routed bound student under personal handle with AES-256 decryption; live Codeforces status surfaced to server logs.\n');
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. Verification Wrap-Up & Health Confirmation

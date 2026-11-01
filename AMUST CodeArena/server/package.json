@@ -31,6 +31,7 @@
     "@google/genai": "^1.0.0",
     "@prisma/client": "^6.8.2",
     "axios": "^1.21.0",
+    "axios-cookiejar-support": "^7.0.0",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.34.8",
     "cheerio": "^1.2.0",
@@ -44,6 +45,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.5.0",
     "nodemailer": "^10.3.1",
+    "tough-cookie": "^6.0.2",
     "xlsx": "^0.18.5",
     "zod": "^3.24.4"
   },

@@ -5,18 +5,20 @@
  *
  * Implements:
  *   1. Modern browser request headers (User-Agent, Accept, Accept-Language, Origin, Referer, Sec-Fetch-*).
- *   2. Automated CSRF & session handling for Codeforces (csrf_token, ftaa, bfaa, cookie jar).
- *   3. Rate-limited polling (Rule 02: max 5 req/s with exponential backoff on HTTP 429/503).
- *   4. Resilient Fallback against Cloudflare Anti-Bot (HTTP 403):
- *      - Fallback A: Queries official Codeforces Public API (user.status) for verified submission.
- *      - Fallback B: Graceful fallback runner with step-by-step test progression without crashing with -1.
- *   5. State streaming: In Queue -> Submitting -> Compiling -> Running on test X -> Final Verdict.
- *   6. Metric capture: Passed test count, execution time (ms), and peak memory (KB).
+ *   2. Persistent cookie jar via tough-cookie and axios-cookiejar-support.
+ *   3. Dynamic CSRF, ftaa, and bfaa token harvesting from https://codeforces.com/enter.
+ *   4. Form-authenticated session login with strict failure verification.
+ *   5. Problem submission to Codeforces (contestId & problemIndex).
+ *   6. Rate-limited polling (Rule 02: max 5 req/s with exponential backoff on HTTP 429/503)
+ *      querying https://codeforces.com/api/user.status?handle=${handle}&from=1&count=5 every 2 seconds.
+ *   7. Zero silent fallback: Surfaces exact errors to server logs and returns real failures.
  */
 
 import crypto from 'crypto';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
 
 // ── Rate Limiter (Rule 02 §1: Strict Max 5 Requests / Second) ────────────────
 class CodeforcesRateLimiter {
@@ -38,12 +40,12 @@ class CodeforcesRateLimiter {
 
 export const cfLimiter = new CodeforcesRateLimiter(5);
 
-// ── Standard Modern Browser Request Headers (Anti-Bot & Cloudflare Resistance) ─
+// ── Standard Modern Browser Request Headers ──────────────────────────────────
 export const DEFAULT_BROWSER_HEADERS = Object.freeze({
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Accept':
-    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
   'Origin': 'https://codeforces.com',
   'Referer': 'https://codeforces.com/enter',
@@ -59,9 +61,10 @@ export const DEFAULT_BROWSER_HEADERS = Object.freeze({
 
 // ── Language ID Mapping for Codeforces ───────────────────────────────────────
 export const CF_PROGRAM_TYPE_IDS = Object.freeze({
-  CPP: '73',        // GNU G++20 64bit (winlibs)
+  CPP: '54',        // GNU G++17 7.3.0 (or 73 for G++20)
+  CPP20: '73',      // GNU G++20 64bit
   C: '43',          // GNU GCC C11 5.1.0
-  JAVA: '87',       // Java 21 64bit (or 60 for Java 11)
+  JAVA: '87',       // Java 21 64bit
   PYTHON: '31',     // Python 3.8.10
   JAVASCRIPT: '55', // Node.js 12.6.3
 });
@@ -79,7 +82,7 @@ export const CF_VERDICT_MAP = Object.freeze({
   IDLENESS_LIMIT_EXCEEDED: { verdict: 'TIME_LIMIT', verdictShort: 'TLE' },
 });
 
-// In-Memory Cookie Jar & Session Store keyed by handle
+// In-Memory Session Store keyed by handle
 const cfSessions = new Map();
 
 /**
@@ -102,7 +105,7 @@ export function generateBfaa() {
 }
 
 /**
- * Updates cookie jar from HTTP Set-Cookie response headers.
+ * Updates cookie jar from HTTP Set-Cookie response headers (helper for tests).
  */
 export function updateCookieJar(jar, setCookieHeaders) {
   if (!setCookieHeaders) return;
@@ -117,7 +120,7 @@ export function updateCookieJar(jar, setCookieHeaders) {
 }
 
 /**
- * Serializes cookie jar map into standard HTTP Cookie header string.
+ * Serializes cookie jar map into standard HTTP Cookie header string (helper for tests).
  */
 export function serializeCookieJar(jar) {
   return Object.entries(jar)
@@ -135,7 +138,6 @@ export function serializeCookieJar(jar) {
 export function parseCodeforcesProblemId(sourceId) {
   if (!sourceId) return null;
   let cleaned = String(sourceId).trim();
-  // Strip optional 'cf-' or 'codeforces-' prefix (case-insensitive)
   cleaned = cleaned.replace(/^(?:cf|codeforces)[-_/ ]?/i, '');
   const match = cleaned.match(/^(\d+)[\/\-_ ]?([A-Za-z][0-9A-Za-z]*)$/);
   if (match) {
@@ -148,50 +150,42 @@ export function parseCodeforcesProblemId(sourceId) {
 }
 
 /**
- * Executes an HTTP request to Codeforces with modern browser headers, rate limiting, and backoff.
+ * Authenticates with Codeforces using a persistent tough-cookie jar and axios-cookiejar-support.
+ *
+ * Process:
+ *   1. GET https://codeforces.com/enter to fetch session cookies and extract csrf_token, ftaa, bfaa.
+ *   2. POST https://codeforces.com/enter with action=enter&handleOrEmail=${handle}&password=${password}&csrf_token=${csrf}.
+ *   3. Verifies authentication success by checking response URL or response body (redirects away from /enter).
+ *
+ * @param {string} handle
+ * @param {string} password
+ * @param {boolean} [forceRefresh=false]
+ * @returns {Promise<object>} Active authenticated session object
  */
-async function executeCfRequest(requestConfig, maxRetries = 3) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    await cfLimiter.throttle();
-
-    try {
-      return await axios({
-        timeout: 15000,
-        validateStatus: (status) => status < 400 || status === 302,
-        ...requestConfig,
-        headers: {
-          ...DEFAULT_BROWSER_HEADERS,
-          ...requestConfig.headers,
-        },
-      });
-    } catch (err) {
-      const status = err.response?.status;
-      if ((status === 429 || status === 503) && attempt < maxRetries) {
-        const backoffMs = Math.min(Math.pow(2, attempt) * 500, 30000);
-        console.warn(`[Codeforces Worker] Rate-limited (HTTP ${status}). Retrying in ${backoffMs}ms (attempt ${attempt}/${maxRetries})...`);
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-/**
- * Authenticates with Codeforces and establishes an active session with valid CSRF tokens.
- * Performs an initial GET to /enter to harvest session cookies and CSRF tokens before POSTing.
- */
-export async function authenticateCodeforcesSession(handle, password) {
+export async function authenticateCodeforcesSession(handle, password, forceRefresh = false) {
   let session = cfSessions.get(handle);
 
-  // If session was established within the last 20 minutes, reuse it
-  if (session && session.isLoggedIn && Date.now() - session.lastLoginTime < 20 * 60 * 1000) {
+  // If session is already logged in within the last 25 minutes, reuse it
+  if (!forceRefresh && session && session.isLoggedIn && Date.now() - session.lastLoginTime < 25 * 60 * 1000) {
     return session;
   }
 
+  // Initialize tough-cookie jar with axios-cookiejar-support
+  const jar = new CookieJar();
+  const client = wrapper(
+    axios.create({
+      jar,
+      withCredentials: true,
+      timeout: 20000,
+      headers: { ...DEFAULT_BROWSER_HEADERS },
+      validateStatus: (status) => status < 500, // allow 302 and 4xx inspection
+    })
+  );
+
   session = {
     handle,
-    cookieJar: {},
+    jar,
+    client,
     ftaa: generateFtaa(),
     bfaa: generateBfaa(),
     csrfToken: null,
@@ -199,40 +193,33 @@ export async function authenticateCodeforcesSession(handle, password) {
     lastLoginTime: 0,
   };
 
-  // Step 1: Initial GET /enter to harvest session cookies and page csrf_token
-  let enterPageRes;
+  // ── Step 1: GET https://codeforces.com/enter ─────────────────────────────
+  await cfLimiter.throttle();
+  console.log(`[Codeforces Worker] Fetching login page (GET https://codeforces.com/enter)...`);
+
+  let enterRes;
   try {
-    enterPageRes = await executeCfRequest({
-      method: 'GET',
-      url: 'https://codeforces.com/enter',
-      headers: {
-        Cookie: serializeCookieJar(session.cookieJar),
-      },
-    });
+    enterRes = await client.get('https://codeforces.com/enter');
   } catch (err) {
-    if (err.response?.status === 403 || err.message?.includes('403')) {
-      const cfError = new Error('Codeforces Cloudflare challenge active (HTTP 403)');
-      cfError.code = 'CF_CLOUDFLARE_403';
-      cfError.statusCode = 403;
-      throw cfError;
-    }
-    throw err;
+    console.error(`[Codeforces Worker] Network connection error on GET /enter:`, err.message);
+    throw new Error(`Codeforces connection error: ${err.message}`);
   }
 
-  updateCookieJar(session.cookieJar, enterPageRes.headers['set-cookie']);
+  const pageHtml = String(enterRes.data || '');
 
-  // Detect Cloudflare interstitial challenge
+  // Check for Cloudflare interstitial challenge
   if (
-    String(enterPageRes.data).includes('Just a moment...') ||
-    String(enterPageRes.data).includes('cf-browser-verification')
+    enterRes.status === 403 ||
+    pageHtml.includes('Just a moment...') ||
+    pageHtml.includes('cf-browser-verification') ||
+    enterRes.headers?.server?.toLowerCase().includes('cloudflare')
   ) {
-    const cfError = new Error('Codeforces Cloudflare browser challenge active (HTTP 403)');
-    cfError.code = 'CF_CLOUDFLARE_403';
-    cfError.statusCode = 403;
-    throw cfError;
+    const errorMsg = 'Codeforces request blocked by Cloudflare anti-bot challenge (HTTP 403)';
+    console.error(`[Codeforces Worker] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
-  const $ = cheerio.load(enterPageRes.data);
+  const $ = cheerio.load(pageHtml);
   const csrfToken =
     $('meta[name="X-Csrf-Token"]').attr('content') ||
     $('input[name="csrf_token"]').val() ||
@@ -240,12 +227,22 @@ export async function authenticateCodeforcesSession(handle, password) {
     $('span[data-csrf]').attr('data-csrf');
 
   if (!csrfToken) {
-    throw new Error('Could not extract CSRF token from Codeforces login page');
+    const errorMsg = 'Could not extract CSRF token from Codeforces login page';
+    console.error(`[Codeforces Worker] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   session.csrfToken = csrfToken;
+  session.ftaa = $('input[name="ftaa"]').val() || session.ftaa;
+  session.bfaa = $('input[name="bfaa"]').val() || session.bfaa;
 
-  // Step 2: POST /enter with credentials
+  const cookies = await jar.getCookies('https://codeforces.com');
+  console.log(`[Codeforces Worker] Harvested ${cookies.length} cookie(s) and CSRF token (${csrfToken.slice(0, 8)}...).`);
+
+  // ── Step 2: POST https://codeforces.com/enter ────────────────────────────
+  await cfLimiter.throttle();
+  console.log(`[Codeforces Worker] Authenticating as "${handle}" (POST https://codeforces.com/enter)...`);
+
   const params = new URLSearchParams();
   params.append('csrf_token', csrfToken);
   params.append('action', 'enter');
@@ -254,46 +251,63 @@ export async function authenticateCodeforcesSession(handle, password) {
   params.append('handleOrEmail', handle);
   params.append('password', password);
   params.append('remember', 'on');
+  params.append('_tta', '176');
 
   let loginRes;
   try {
-    loginRes = await executeCfRequest({
-      method: 'POST',
-      url: 'https://codeforces.com/enter',
-      data: params.toString(),
-      maxRedirects: 0,
+    loginRes = await client.post('https://codeforces.com/enter', params.toString(), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Referer: 'https://codeforces.com/enter',
-        Cookie: serializeCookieJar(session.cookieJar),
+        Origin: 'https://codeforces.com',
       },
+      maxRedirects: 5,
     });
   } catch (err) {
-    if (err.response?.status === 403 || err.message?.includes('403')) {
-      const cfError = new Error('Codeforces Cloudflare challenge on login (HTTP 403)');
-      cfError.code = 'CF_CLOUDFLARE_403';
-      cfError.statusCode = 403;
-      throw cfError;
-    }
-    throw err;
+    console.error(`[Codeforces Worker] Network error on POST /enter:`, err.message);
+    throw new Error(`Codeforces login POST failed: ${err.message}`);
   }
 
-  updateCookieJar(session.cookieJar, loginRes.headers['set-cookie']);
+  const loginHtml = String(loginRes.data || '');
+  const finalUrl = loginRes.request?.res?.responseUrl || loginRes.headers?.location || '';
 
-  // Success indicator: HTTP 302 redirect or login confirmation
-  if (loginRes.status === 302 || !String(loginRes.data).includes('Invalid handle or password')) {
-    session.isLoggedIn = true;
-    session.lastLoginTime = Date.now();
-    cfSessions.set(handle, session);
-    return session;
+  // Check login failure indicators
+  if (loginHtml.includes('Invalid handle or password')) {
+    const errorMsg = `Codeforces login failed for "${handle}": Invalid handle or password`;
+    console.error(`[Codeforces Worker] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
-  throw new Error(`Failed to log in to Codeforces as handle '${handle}': Invalid credentials or captcha barrier`);
+  if (loginHtml.includes('You have submitted incorrect password too many times')) {
+    const errorMsg = `Codeforces login locked for "${handle}": Too many incorrect password attempts`;
+    console.error(`[Codeforces Worker] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  const $login = cheerio.load(loginHtml);
+  const userProfileLink = $login(`a[href="/profile/${handle}"]`).length > 0;
+  const hasPasswordInput = $login('input[name="password"]').length > 0;
+
+  // Authentication success: redirected away from /enter or profile link confirmed
+  const isAuthSuccess =
+    userProfileLink ||
+    (!hasPasswordInput && (loginRes.status === 302 || (finalUrl && !finalUrl.includes('/enter'))));
+
+  if (!isAuthSuccess) {
+    const errorMsg = `Codeforces authentication failed for "${handle}": Login was not confirmed by Codeforces`;
+    console.error(`[Codeforces Worker] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  session.isLoggedIn = true;
+  session.lastLoginTime = Date.now();
+  cfSessions.set(handle, session);
+  console.log(`[Codeforces Worker] ✅ Successfully authenticated session for handle "${handle}".`);
+  return session;
 }
 
 /**
  * Submits solution code to a Codeforces problem using the authenticated session.
- * Features automated Cloudflare 403 fallback to official API or resilient fallback runner.
  *
  * @param {object} params
  * @param {string} params.handle
@@ -303,7 +317,7 @@ export async function authenticateCodeforcesSession(handle, password) {
  * @param {string} params.language 'CPP' | 'C' | 'JAVA' | 'PYTHON' | 'JAVASCRIPT'
  * @param {string} params.sourceCode
  * @param {boolean} [params.dryRun=false]
- * @returns {Promise<{ remoteSubmissionId: number, isMock?: boolean, isFallback?: boolean, cloudflareShielded?: boolean }>}
+ * @returns {Promise<{ remoteSubmissionId: number, isMock?: boolean }>}
  */
 export async function submitToCodeforces({
   handle,
@@ -314,138 +328,124 @@ export async function submitToCodeforces({
   sourceCode,
   dryRun = false,
 }) {
-  // Graceful Dry-Run simulation mode if explicitly requested or bot credentials are mock
+  // Explicit Dry-Run / Mock simulation mode
   if (dryRun || process.env.CF_MOCK_MODE === 'true' || handle === 'mock_cf_bot') {
     const mockId = Math.floor(100000000 + Math.random() * 900000000);
     return { remoteSubmissionId: mockId, isMock: true };
   }
 
+  // 1. Authenticate with Codeforces
+  const session = await authenticateCodeforcesSession(handle, password);
+
+  // 2. Resolve programTypeId (e.g. 54 for C++17, 73 for C++20)
+  const langKey = (language || 'CPP').toUpperCase();
+  const programTypeId = CF_PROGRAM_TYPE_IDS[langKey] || CF_PROGRAM_TYPE_IDS.CPP;
+
+  // 3. GET submit page to get fresh CSRF token
+  await cfLimiter.throttle();
+  let submitPageRes;
   try {
-    const session = await authenticateCodeforcesSession(handle, password);
-    const programTypeId = CF_PROGRAM_TYPE_IDS[language.toUpperCase()] || CF_PROGRAM_TYPE_IDS.CPP;
+    submitPageRes = await session.client.get(`https://codeforces.com/contest/${contestId}/submit`);
+  } catch (err) {
+    try {
+      submitPageRes = await session.client.get('https://codeforces.com/problemset/submit');
+    } catch (innerErr) {
+      console.error(`[Codeforces Worker] Failed to load submit page: ${innerErr.message}`);
+      throw new Error(`Failed to load Codeforces submit page: ${innerErr.message}`);
+    }
+  }
 
-    // Step 1: GET submit page to get fresh CSRF token for the contest
-    const submitPageRes = await executeCfRequest({
-      method: 'GET',
-      url: `https://codeforces.com/contest/${contestId}/submit`,
-      headers: {
-        Cookie: serializeCookieJar(session.cookieJar),
-      },
-    });
+  const $submit = cheerio.load(String(submitPageRes.data || ''));
+  const submitCsrf =
+    $submit('meta[name="X-Csrf-Token"]').attr('content') ||
+    $submit('input[name="csrf_token"]').val() ||
+    session.csrfToken;
 
-    updateCookieJar(session.cookieJar, submitPageRes.headers['set-cookie']);
-    const $ = cheerio.load(submitPageRes.data);
-    const submitCsrf =
-      $('meta[name="X-Csrf-Token"]').attr('content') ||
-      $('input[name="csrf_token"]').val() ||
-      session.csrfToken;
+  if (!submitCsrf) {
+    throw new Error('Could not extract CSRF token from Codeforces submit page');
+  }
 
-    // Step 2: POST submit solution form
-    const form = new URLSearchParams();
-    form.append('csrf_token', submitCsrf);
-    form.append('action', 'submitSolutionFormSubmitted');
-    form.append('ftaa', session.ftaa);
-    form.append('bfaa', session.bfaa);
-    form.append('submittedProblemIndex', problemIndex);
-    form.append('programTypeId', programTypeId);
-    form.append('source', sourceCode);
-    form.append('tabSize', '4');
+  // 4. POST submit solution form
+  await cfLimiter.throttle();
+  const form = new URLSearchParams();
+  form.append('csrf_token', submitCsrf);
+  form.append('action', 'submitSolutionFormSubmitted');
+  form.append('ftaa', session.ftaa);
+  form.append('bfaa', session.bfaa);
+  form.append('submittedProblemIndex', problemIndex);
+  form.append('submittedProblemCode', `${contestId}${problemIndex}`);
+  form.append('programTypeId', programTypeId);
+  form.append('source', sourceCode);
+  form.append('tabSize', '4');
+  form.append('_tta', '176');
 
-    const submitRes = await executeCfRequest({
-      method: 'POST',
-      url: `https://codeforces.com/contest/${contestId}/submit?csrf_token=${submitCsrf}`,
-      data: form.toString(),
-      maxRedirects: 0,
+  const submitUrl = `https://codeforces.com/contest/${contestId}/submit?csrf_token=${submitCsrf}`;
+  let submitRes;
+  try {
+    submitRes = await session.client.post(submitUrl, form.toString(), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Referer: `https://codeforces.com/contest/${contestId}/submit`,
-        Cookie: serializeCookieJar(session.cookieJar),
+        Origin: 'https://codeforces.com',
       },
+      maxRedirects: 5,
     });
+  } catch (err) {
+    console.error(`[Codeforces Worker] Error posting submission: ${err.message}`);
+    throw new Error(`Codeforces solution submission failed: ${err.message}`);
+  }
 
-    updateCookieJar(session.cookieJar, submitRes.headers['set-cookie']);
+  const submitHtml = String(submitRes.data || '');
 
-    // Check for duplicate code submission error
-    if (String(submitRes.data).includes('You have submitted exactly the same code before')) {
-      throw new Error('Codeforces rejected: You have submitted exactly the same code before.');
-    }
+  // Check for submission rejection errors
+  if (submitHtml.includes('You have submitted exactly the same code before')) {
+    throw new Error('Codeforces rejected: You have submitted exactly the same code before.');
+  }
+  if (submitHtml.includes('Source code is empty')) {
+    throw new Error('Codeforces rejected: Source code is empty.');
+  }
 
-    // Step 3: Identify the newly created submission ID
-    const locationHeader = submitRes.headers['location'] || '';
-    const matchId = locationHeader.match(/submission\/(\d+)/);
-    if (matchId) {
-      return { remoteSubmissionId: Number(matchId[1]) };
-    }
+  const $res = cheerio.load(submitHtml);
+  const errorText = $res('.error.for__source, .error.for__submittedProblemCode, .error.for__programTypeId').text().trim();
+  if (errorText) {
+    throw new Error(`Codeforces rejected submission: ${errorText}`);
+  }
 
-    // Fallback: Query official Codeforces API for latest submission by this handle
-    const statusRes = await executeCfRequest({
-      method: 'GET',
-      url: `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
-    });
+  // 5. Extract submission ID from redirect location or API
+  const finalLocation = submitRes.headers?.location || submitRes.request?.res?.responseUrl || '';
+  const matchId = finalLocation.match(/submission\/(\d+)/);
+  if (matchId) {
+    return { remoteSubmissionId: Number(matchId[1]) };
+  }
+
+  // Fallback: Query official API for latest submission by this handle
+  await cfLimiter.throttle();
+  try {
+    const statusRes = await axios.get(
+      `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
+      {
+        timeout: 10000,
+        headers: DEFAULT_BROWSER_HEADERS,
+      }
+    );
 
     if (statusRes.data?.status === 'OK' && Array.isArray(statusRes.data.result) && statusRes.data.result.length > 0) {
-      const latest = statusRes.data.result.find(
+      const match = statusRes.data.result.find(
         (s) => s.contestId === contestId && s.problem?.index === problemIndex
       ) || statusRes.data.result[0];
 
-      return { remoteSubmissionId: latest.id };
+      return { remoteSubmissionId: match.id };
     }
-
-    throw new Error('Codeforces submission was accepted but remote submission ID could not be retrieved');
-  } catch (err) {
-    const isCloudflareBlocked =
-      err.code === 'CF_CLOUDFLARE_403' ||
-      err.response?.status === 403 ||
-      err.message?.includes('403') ||
-      err.message?.includes('Cloudflare');
-
-    if (isCloudflareBlocked) {
-      console.warn(`⚠️ [Codeforces Worker] Direct web submission hit Cloudflare protection (HTTP 403) for handle "${handle}".`);
-      console.warn(`   Attempting fallback: querying official Codeforces public API...`);
-
-      // ── Fallback Step A: Query Official Codeforces Public API ──
-      try {
-        const apiRes = await executeCfRequest({
-          method: 'GET',
-          url: `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=10`,
-        });
-
-        if (apiRes.data?.status === 'OK' && Array.isArray(apiRes.data.result) && apiRes.data.result.length > 0) {
-          const recent = apiRes.data.result.find(
-            (s) => s.contestId === contestId && s.problem?.index === problemIndex
-          );
-
-          if (recent) {
-            console.log(`✅ [Codeforces Worker] Found verified remote submission #${recent.id} via official API.`);
-            return {
-              remoteSubmissionId: recent.id,
-              viaOfficialApi: true,
-              isMock: false,
-            };
-          }
-        }
-      } catch (apiErr) {
-        console.warn(`   Official API query note: ${apiErr.message}`);
-      }
-
-      // ── Fallback Step B: Graceful Fallback Runner ──
-      console.log(`ℹ️ [Codeforces Worker] Activating resilient fallback runner (simulated validation mode).`);
-      const fallbackId = Math.floor(100000000 + Math.random() * 900000000);
-      return {
-        remoteSubmissionId: fallbackId,
-        isFallback: true,
-        cloudflareShielded: true,
-        message: 'Codeforces Cloudflare shield active. Processed via resilient fallback runner.',
-      };
-    }
-
-    // Re-throw other non-403 errors (e.g. duplicate submission)
-    throw err;
+  } catch (apiErr) {
+    console.warn(`[Codeforces Worker] user.status query note: ${apiErr.message}`);
   }
+
+  throw new Error('Codeforces submission was posted but submission ID could not be retrieved');
 }
 
 /**
  * Polls Codeforces API for real-time verdict and metrics.
+ * Polls https://codeforces.com/api/user.status?handle=${handle}&from=1&count=5 every 2 seconds.
  *
  * @param {object} params
  * @param {string} params.handle
@@ -453,11 +453,9 @@ export async function submitToCodeforces({
  * @param {number} [params.contestId]
  * @param {string} [params.problemIndex]
  * @param {Function} [params.onProgress] Callback with { state, currentTestcase, totalTestcases, timeMs, memoryKb }
- * @param {number} [params.maxAttempts=25]
- * @param {number} [params.pollIntervalMs=2500]
+ * @param {number} [params.maxAttempts=30]
+ * @param {number} [params.pollIntervalMs=2000]
  * @param {boolean} [params.dryRun=false]
- * @param {boolean} [params.isFallback=false]
- * @param {boolean} [params.cloudflareShielded=false]
  * @returns {Promise<object>}
  */
 export async function pollCodeforcesVerdict({
@@ -466,17 +464,13 @@ export async function pollCodeforcesVerdict({
   contestId,
   problemIndex,
   onProgress = () => {},
-  maxAttempts = 25,
-  pollIntervalMs = 2500,
+  maxAttempts = 30,
+  pollIntervalMs = 2000,
   dryRun = false,
-  isFallback = false,
-  cloudflareShielded = false,
 }) {
-  // ── Resilient Fallback Runner / Simulation Mode ─────────────────────────────
+  // Explicit Dry-Run / Mock Simulation Mode
   if (
     dryRun ||
-    isFallback ||
-    cloudflareShielded ||
     process.env.CF_MOCK_MODE === 'true' ||
     handle === 'mock_cf_bot'
   ) {
@@ -498,23 +492,24 @@ export async function pollCodeforcesVerdict({
       testcasesPassed: 10,
       totalTestcases: 10,
       rawVerdict: 'OK',
-      isFallback: true,
-      cloudflareShielded: Boolean(cloudflareShielded),
-      message: cloudflareShielded
-        ? 'Evaluated via resilient Codeforces proxy fallback pipeline (Cloudflare shielded).'
-        : 'Simulated execution completed via Codeforces remote proxy',
+      isMock: true,
+      message: 'Simulated execution completed via Codeforces remote proxy',
     };
   }
 
-  // ── Live Codeforces API Polling Loop ────────────────────────────────────────
+  // Live Codeforces API Polling Loop (Poll every 2 seconds)
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await cfLimiter.throttle();
 
     try {
-      const response = await executeCfRequest({
-        method: 'GET',
-        url: `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=10`,
-      });
+      const response = await axios.get(
+        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=5`,
+        {
+          timeout: 10000,
+          headers: DEFAULT_BROWSER_HEADERS,
+        }
+      );
 
       if (response.data?.status !== 'OK' || !Array.isArray(response.data.result)) {
         continue;
@@ -562,35 +557,12 @@ export async function pollCodeforcesVerdict({
         error: mapped.verdict !== 'ACCEPTED' ? `Codeforces verdict: ${rawVerdict} on test ${passedTestCount + 1}` : null,
       };
     } catch (err) {
-      if (err.response?.status === 403 || err.message?.includes('403')) {
-        console.warn(`[Codeforces Poller Warning]: Official API poll returned 403. Using graceful fallback.`);
-        return {
-          remoteSubmissionId,
-          verdict: 'ACCEPTED',
-          verdictShort: 'AC',
-          timeMs: 46,
-          memoryKb: 4096,
-          testcasesPassed: 10,
-          totalTestcases: 10,
-          isFallback: true,
-          message: 'Codeforces verdict verified via fallback.',
-        };
-      }
       console.warn(`[Codeforces Poller Warning (Attempt ${attempt}/${maxAttempts})]:`, err.message);
     }
   }
 
-  // Polling timeout fallback
-  return {
-    remoteSubmissionId,
-    verdict: 'TIME_LIMIT',
-    verdictShort: 'TLE',
-    timeMs: 2000,
-    memoryKb: 0,
-    testcasesPassed: 0,
-    totalTestcases: 1,
-    error: 'Codeforces evaluation timed out after polling limit',
-  };
+  // Polling timeout: surface real failure error rather than artificial "Accepted"
+  throw new Error(`Codeforces evaluation timed out after ${maxAttempts * (pollIntervalMs / 1000)} seconds of polling`);
 }
 
 export default {
@@ -601,6 +573,8 @@ export default {
   generateFtaa,
   generateBfaa,
   parseCodeforcesProblemId,
+  updateCookieJar,
+  serializeCookieJar,
   authenticateCodeforcesSession,
   submitToCodeforces,
   pollCodeforcesVerdict,
