@@ -393,8 +393,8 @@ export async function authenticateCodeforcesSession(handle, password, forceRefre
 /**
  * Headless Browser Proxy for Codeforces authentication & submission under Cloudflare Turnstile.
  * Enforces strict bounded timeouts:
- *   - 30s maximum navigation/load timeout on browser interactions.
- *   - 25s maximum Cloudflare Turnstile resolution timeout.
+ *   - 45s maximum navigation/load timeout on browser interactions (Render container friendly).
+ *   - 30s maximum Cloudflare Turnstile resolution timeout.
  *   - Guaranteed try/finally browser closure preventing orphaned Chromium processes.
  *   - Pre-authenticated Session Cookie & Clearance Injection (JSESSIONID + cf_clearance + RCPC) to bypass /enter & Turnstile directly.
  *
@@ -419,8 +419,9 @@ export async function submitViaHeadlessBrowser({
   problemIndex,
   programTypeId,
   sourceCode,
-  timeoutMs = 30000,
-  turnstileTimeoutMs = 25000,
+  timeoutMs = 45000,
+  turnstileTimeoutMs = 30000,
+  useContestSubmit = false,
   jsessionid,
   cfClearance,
   rcpc,
@@ -473,10 +474,11 @@ export async function submitViaHeadlessBrowser({
       page.setDefaultTimeout(timeoutMs);
       await page.setViewport({ width: 1280, height: 800 });
 
-      // Determine target submission endpoint URL (problemset/submit or contest submit)
+      // Determine target submission endpoint URL
+      // Use https://codeforces.com/problemset/submit as the primary universal submission URL for standard problems
       const problemsetSubmitUrl = 'https://codeforces.com/problemset/submit';
       const contestSubmitUrl = contestId ? `https://codeforces.com/contest/${contestId}/submit` : null;
-      let targetSubmitUrl = contestSubmitUrl || problemsetSubmitUrl;
+      let targetSubmitUrl = useContestSubmit && contestSubmitUrl ? contestSubmitUrl : problemsetSubmitUrl;
 
       // ─────────────────────────────────────────────────────────────────
       // Branch A: Session Cookie & Cloudflare Clearance Injection Mode
@@ -683,15 +685,36 @@ export async function submitViaHeadlessBrowser({
       // ─────────────────────────────────────────────────────────────────
       // Step: Populate problem, language, and source code
       // ─────────────────────────────────────────────────────────────────
+      const fullProblemCode = `${contestId || ''}${problemIndex || ''}`.trim().toUpperCase();
+      const cleanProblemIndex = (problemIndex || '').trim().toUpperCase();
+
+      const currentSubmitUrl = page.url();
+      const isContestPage = currentSubmitUrl.includes('/contest/');
+
+      console.log(
+        `[Codeforces Browser Worker] Populating form (Page: ${isContestPage ? 'Contest' : 'Problemset'}, ` +
+        `Full Code: "${fullProblemCode}", Index: "${cleanProblemIndex}")...`
+      );
+
+      // If submitting via /contest/:contestId/submit, separate the contest ID from the letter index (e.g. Contest 2267, Problem B)
+      // and select option B in the submittedProblemIndex select element
       const problemSelect = await page.$('select[name="submittedProblemIndex"]');
       if (problemSelect) {
-        await page.select('select[name="submittedProblemIndex"]', problemIndex.toUpperCase());
+        console.log(`[Codeforces Browser Worker] Selecting problem index "${cleanProblemIndex}" in dropdown...`);
+        try {
+          await page.select('select[name="submittedProblemIndex"]', cleanProblemIndex);
+        } catch (selErr) {
+          console.warn(`[Codeforces Browser Worker] Dropdown selection warning: ${selErr.message}`);
+        }
       }
 
+      // For problemset/submit, set the input field name="submittedProblemCode" to the full problem code (e.g. 2267B or 4A)
       const problemCodeInput = await page.$('input[name="submittedProblemCode"]');
       if (problemCodeInput) {
+        console.log(`[Codeforces Browser Worker] Setting input[name="submittedProblemCode"] to "${fullProblemCode}"...`);
         await problemCodeInput.click({ clickCount: 3 });
-        await problemCodeInput.type(`${contestId}${problemIndex}`);
+        await page.keyboard.press('Backspace');
+        await problemCodeInput.type(fullProblemCode, { delay: 10 });
       }
 
       const langSelect = await page.$('select[name="programTypeId"]');
@@ -867,8 +890,8 @@ export async function submitToCodeforces({
         problemIndex,
         programTypeId,
         sourceCode,
-        timeoutMs: 30000,
-        turnstileTimeoutMs: 25000,
+        timeoutMs: 45000,
+        turnstileTimeoutMs: 30000,
         jsessionid: cookieJsessionId,
         cfClearance: cookieCfClearance,
         rcpc: cookieRcpc,
@@ -880,9 +903,10 @@ export async function submitToCodeforces({
   // 2. GET submission endpoint directly using the pre-authenticated session
   await cfLimiter.throttle();
   let submitPageRes;
-  const contestSubmitUrl = contestId ? `https://codeforces.com/contest/${contestId}/submit` : null;
   const problemsetSubmitUrl = 'https://codeforces.com/problemset/submit';
-  let targetSubmitUrl = contestSubmitUrl || problemsetSubmitUrl;
+  const contestSubmitUrl = contestId ? `https://codeforces.com/contest/${contestId}/submit` : null;
+  // Use problemset/submit as the primary universal submission URL for standard problemset problems
+  let targetSubmitUrl = problemsetSubmitUrl;
 
   try {
     submitPageRes = await session.client.get(targetSubmitUrl);
@@ -917,8 +941,8 @@ export async function submitToCodeforces({
       problemIndex,
       programTypeId,
       sourceCode,
-      timeoutMs: 30000,
-      turnstileTimeoutMs: 25000,
+      timeoutMs: 45000,
+      turnstileTimeoutMs: 30000,
       jsessionid: cookieJsessionId,
       cfClearance: cookieCfClearance,
       rcpc: cookieRcpc,
@@ -955,10 +979,13 @@ export async function submitToCodeforces({
   form.append('action', 'submitSolutionFormSubmitted');
   form.append('ftaa', session.ftaa);
   form.append('bfaa', session.bfaa);
+  const fullProblemCode = `${contestId || ''}${problemIndex || ''}`.trim().toUpperCase();
+  const cleanProblemIndex = (problemIndex || '').trim().toUpperCase();
+
   if (targetSubmitUrl.includes('/contest/')) {
-    form.append('submittedProblemIndex', problemIndex.toUpperCase());
+    form.append('submittedProblemIndex', cleanProblemIndex);
   }
-  form.append('submittedProblemCode', `${contestId}${problemIndex}`);
+  form.append('submittedProblemCode', fullProblemCode);
   form.append('programTypeId', programTypeId);
   form.append('source', sourceCode);
   form.append('tabSize', '4');

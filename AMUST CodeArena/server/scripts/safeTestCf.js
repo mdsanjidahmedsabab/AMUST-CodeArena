@@ -6,9 +6,9 @@
  * Implements:
  *   1. Environment Variable detection for CF_COOKIE_JSESSIONID, CF_CLEARANCE, and optional CF_COOKIE_RCPC.
  *   2. Pre-authenticated Session Cookie & Cloudflare Clearance Injection for domain .codeforces.com.
- *   3. Direct submission endpoint navigation (bypasses /enter and Cloudflare Turnstile).
+ *   3. Universal problemset submission endpoint navigation (https://codeforces.com/problemset/submit).
  *   4. Extraction of CSRF token (data-csrf) directly from authenticated DOM.
- *   5. Strict 30s execution boundary enforced by AbortController.
+ *   5. Strict 45s execution boundary enforced by AbortController (Render container friendly).
  *   6. Guaranteed try/finally cleanup to prevent background hangs or orphaned Chromium processes.
  */
 
@@ -36,9 +36,9 @@ async function safeTestCodeforces() {
   console.log(` - Bot Handle: ${handle}`);
   console.log(` - Target Problem: Codeforces 4A (Watermelon)`);
   console.log(` - Language: GNU C++17 (ID: 54)`);
-  console.log(` - Max Navigation Timeout: 30,000 ms`);
-  console.log(` - Max Turnstile Timeout: 25,000 ms`);
-  console.log(` - AbortController Hard Boundary: 30,000 ms`);
+  console.log(` - Max Navigation Timeout: 45,000 ms`);
+  console.log(` - Max Turnstile Timeout: 30,000 ms`);
+  console.log(` - AbortController Hard Boundary: 45,000 ms`);
   console.log(` - CF_COOKIE_JSESSIONID: ${jsessionid ? `${jsessionid.slice(0, 8)}... (Length: ${jsessionid.length})` : '(Not configured in .env)'}`);
   console.log(` - CF_CLEARANCE: ${cfClearance ? `${cfClearance.slice(0, 12)}... (Length: ${cfClearance.length})` : '(Not configured in .env)'}`);
   console.log(` - CF_COOKIE_RCPC: ${rcpc ? `${rcpc.slice(0, 8)}... (Length: ${rcpc.length})` : '(Not configured in .env - optional)'}`);
@@ -58,13 +58,13 @@ int main() {
 }
 `;
 
-  // 1. Initialize explicit 30s AbortController
+  // 1. Initialize explicit 45s AbortController
   const controller = new AbortController();
   const startTime = Date.now();
   const abortTimer = setTimeout(() => {
-    console.warn('\n⚠️ [AbortController] 30-second hard boundary reached. Triggering abort signal...');
+    console.warn('\n⚠️ [AbortController] 45-second hard boundary reached. Triggering abort signal...');
     controller.abort();
-  }, 30000);
+  }, 45000);
 
   let runResult = null;
   let runError = null;
@@ -75,7 +75,7 @@ int main() {
     // Race the browser worker with the abort signal
     const abortPromise = new Promise((_, reject) => {
       controller.signal.addEventListener('abort', () => {
-        reject(new Error('Operation aborted: 30-second execution boundary reached.'));
+        reject(new Error('Operation aborted: 45-second execution boundary reached.'));
       });
     });
 
@@ -86,8 +86,8 @@ int main() {
       problemIndex: 'A',
       programTypeId: 54,
       sourceCode: sampleSourceCode,
-      timeoutMs: 30000,
-      turnstileTimeoutMs: 25000,
+      timeoutMs: 45000,
+      turnstileTimeoutMs: 30000,
       jsessionid,
       cfClearance,
       rcpc,
@@ -98,41 +98,26 @@ int main() {
     console.log('\n[Step 2/3] Submission completed successfully!');
     console.log(` - Remote Submission ID: ${runResult?.remoteSubmissionId || 'Queued / Extracted'}`);
     if (runResult?.csrfToken) {
-      console.log(` - Harvested CSRF Token (data-csrf): ${runResult.csrfToken.slice(0, 8)}...`);
+      console.log(` - Harvested CSRF Token: ${runResult.csrfToken.slice(0, 8)}...`);
     }
   } catch (err) {
     runError = err;
-    console.log('\n[Step 2/3] Bounded timeout / execution error captured safely:');
-    console.log(` - Error Type: ${err.name || 'Error'}`);
-    console.log(` - Error Message: "${err.message}"`);
+    console.error(`\n❌ [Step 2/3] Execution failed: ${err.message}`);
   } finally {
-    // 2. Guaranteed Cleanup
     clearTimeout(abortTimer);
-    const elapsedMs = Date.now() - startTime;
-
-    console.log('\n[Step 3/3] Teardown & Resource Verification:');
-    console.log(` - Total Elapsed Time: ${elapsedMs} ms`);
-    console.log(` - AbortController Timer Cleared: YES`);
-    console.log(` - Browser Context Terminated: YES (closed via worker try/finally)`);
-    console.log(` - Process Exit Safe: Clean termination guaranteed.\n`);
-
-    console.log('===============================================================');
-    if (runResult) {
-      console.log('🎉 STATUS: LIVE SUBMISSION SUCCESSFUL (Session Cookie & Cloudflare Clearance Injection verified)');
-    } else if (runError && runError.message.includes('25 seconds')) {
-      console.log('🛡️ STATUS: BOUNDED TIMEOUT GRACEFULLY ENFORCED (Turnstile 25s safety verified)');
-    } else {
-      console.log(`🛡️ STATUS: SAFE COMPLETION (Handled cleanly: ${runError?.message})`);
-    }
+    const elapsed = Date.now() - startTime;
+    console.log('\n[Step 3/3] Guaranteed Teardown & Metrics:');
+    console.log(` - Elapsed Execution Time: ${elapsed} ms`);
+    console.log(` - Memory (RSS): ${Math.round(process.memoryUsage().rss / 1024 / 1024)} MB`);
+    console.log(` - Status: ${runError ? 'FAILED / TIMED OUT' : 'SUCCESS'}`);
     console.log('===============================================================\n');
+
+    if (runError) {
+      process.exit(1);
+    } else {
+      process.exit(0);
+    }
   }
 }
 
-safeTestCodeforces()
-  .then(() => {
-    process.exit(0);
-  })
-  .catch((fatalErr) => {
-    console.error('Fatal unhandled error:', fatalErr);
-    process.exit(1);
-  });
+safeTestCodeforces();
