@@ -445,13 +445,15 @@ export async function submitViaHeadlessBrowser({
       `(Problem ${contestId}${problemIndex}${hasInjectedCookies ? ' | Injected Session & Clearance: ACTIVE' : ''})...`
     );
 
-    // Launch browser with stealth evasion arguments
+    // Launch browser with stealth evasion arguments (container hardened for Docker / Render)
     browser = await puppeteer.launch({
       headless: process.env.CF_HEADLESS === 'false' ? false : 'new',
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        '--disable-gpu',
         '--disable-blink-features=AutomationControlled',
         '--window-size=1280,800',
       ],
