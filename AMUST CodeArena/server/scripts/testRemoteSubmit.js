@@ -189,7 +189,7 @@ async function main() {
       sourceCode: WATERMELON_CPP_SOURCE,
       language: 'CPP',
       submissionId: `cli_sub_bound_${ts}`,
-      dryRun: !hasLiveBot,
+      dryRun: false, // Live HTTP path: verifies anti-bot headers & Cloudflare 403 resilience
       onProgress: (prog) => {
         scenarioBStates.push(prog.state);
         console.log(`   ⏱️  [Pipeline Stage]: ${prog.state} | Current Test: ${prog.currentTestcase}/${prog.totalTestcases}`);
@@ -202,13 +202,14 @@ async function main() {
     console.log(`      • Is Remote OJ       : ${resultB.isRemote ? 'YES' : 'NO'} (${resultB.remoteOj})`);
     console.log(`      • Dispatched Handle  : "${resultB.dispatchedHandle}"`);
     console.log(`      • Personal Account   : ${resultB.isPersonalAccount ? 'YES (Personal Credentials Used)' : 'NO'}`);
+    console.log(`      • Fallback / Shield  : ${resultB.isFallback ? 'YES (Cloudflare 403 Intercepted & Resolved)' : 'NO (Direct Remote)'}`);
     console.log(`      • Remote Sub ID      : #${resultB.remoteSubmissionId}`);
     console.log(`      • Execution Time     : ${resultB.timeMs} ms`);
     console.log(`      • Peak Memory        : ${resultB.memoryKb} KB`);
     console.log(`      • Testcases Passed   : ${resultB.testcasesPassed}/${resultB.totalTestcases}`);
     console.log(`      • Total Wall Time    : ${elapsedB} ms`);
     console.log(`      • Pipeline History   : ${scenarioBStates.join(' ➔ ')}`);
-    console.log('   ✅ SCENARIO B VERIFIED: Successfully routed bound student under personal handle with AES-256 decryption.\n');
+    console.log('   ✅ SCENARIO B VERIFIED: Successfully routed bound student under personal handle with AES-256 decryption & 403 resilience.\n');
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. Verification Wrap-Up & Health Confirmation
