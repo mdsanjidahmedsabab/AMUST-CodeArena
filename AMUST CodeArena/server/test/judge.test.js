@@ -346,7 +346,9 @@ int main() {
   console.log(`   ✓ HTTP Python Submission created (ID: ${submitData.submissionId}, Verdict: ${submitData.verdict})`);
 
   // Verify status endpoint
-  const statusRes = await fetch(`${baseUrl}/${submitData.submissionId}/status`);
+  const statusRes = await fetch(`${baseUrl}/${submitData.submissionId}/status`, {
+    headers: { Authorization: `Bearer ${studentToken}` },
+  });
   assert.equal(statusRes.status, 200);
   const statusData = await statusRes.json();
   assert.equal(statusData.id, submitData.submissionId);

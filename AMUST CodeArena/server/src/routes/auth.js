@@ -741,7 +741,16 @@ router.post('/refresh', async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: payload.id } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        isSuperAdmin: true,
+        refreshTokenHash: true,
+      },
+    });
     if (!user || !user.refreshTokenHash) {
       return res.status(401).json({ error: 'Session has been invalidated' });
     }
@@ -780,7 +789,23 @@ router.post('/logout', authenticate, async (req, res, next) => {
 
 router.get('/me', authenticate, async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        universityId: true,
+        name: true,
+        role: true,
+        isVerified: true,
+        isSuperAdmin: true,
+        rating: true,
+        tier: true,
+        sessionMode: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
     if (!user) return res.status(404).json({ error: 'User not found' });
     return res.json({ user: safeUser(user) });
   } catch (err) {

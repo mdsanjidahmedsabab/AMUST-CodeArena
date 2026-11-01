@@ -27,6 +27,8 @@ import {
   parseCodeforcesProblemId,
   updateCookieJar,
   serializeCookieJar,
+  getInjectedCfCookies,
+  authenticateCodeforcesSession,
   CF_PROGRAM_TYPE_IDS,
   CF_VERDICT_MAP,
 } from '../src/services/remoteJudge/codeforcesWorker.js';
@@ -91,7 +93,34 @@ async function runTests() {
   assert.equal(CF_VERDICT_MAP.MEMORY_LIMIT_EXCEEDED.verdict, 'MEMORY_LIMIT');
   assert.equal(CF_VERDICT_MAP.COMPILATION_ERROR.verdict, 'COMPILATION_ERROR');
 
-  console.log('   ✅ CSRF tokens, problem ID parsing, cookie jar, and verdict mappings verified.');
+  // 1.6 Session Cookie & Cloudflare Clearance Injection Helpers
+  const cookieRes1 = getInjectedCfCookies({
+    jsessionid: '  test_jsessionid_123  ',
+    cfClearance: '  test_clearance_abc  ',
+    rcpc: '  test_rcpc_456  ',
+  });
+  assert.equal(cookieRes1.jsessionid, 'test_jsessionid_123');
+  assert.equal(cookieRes1.cfClearance, 'test_clearance_abc');
+  assert.equal(cookieRes1.rcpc, 'test_rcpc_456');
+  assert.equal(cookieRes1.hasInjectedCookies, true);
+
+  const cookieRes2 = getInjectedCfCookies({ jsessionid: '', cfClearance: '', rcpc: '' });
+  assert.equal(cookieRes2.hasInjectedCookies, false);
+
+  // Authenticate using injected cookies (should skip /enter completely and register active session)
+  const injectedSession = await authenticateCodeforcesSession('test_bot', null, true, {
+    jsessionid: 'dummy_sess_789',
+    cfClearance: 'dummy_clearance_xyz',
+    rcpc: 'dummy_rcpc_abc',
+  });
+  assert.equal(injectedSession.isLoggedIn, true);
+  assert.equal(injectedSession.isInjectedSession, true);
+  const storedCookies = await injectedSession.jar.getCookies('https://codeforces.com');
+  assert.ok(storedCookies.some((c) => c.key === 'JSESSIONID' && c.value === 'dummy_sess_789'));
+  assert.ok(storedCookies.some((c) => c.key === 'cf_clearance' && c.value === 'dummy_clearance_xyz'));
+  assert.ok(storedCookies.some((c) => c.key === 'RCPC' && c.value === 'dummy_rcpc_abc'));
+
+  console.log('   ✅ CSRF tokens, problem ID parsing, cookie jar, verdict mappings, and session & clearance injection verified.');
 
   // ─────────────────────────────────────────────────────────────
   // 2. Problem Source Normalization

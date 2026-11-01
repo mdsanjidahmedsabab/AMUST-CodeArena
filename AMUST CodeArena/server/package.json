@@ -24,7 +24,8 @@
     "test:telemetry": "node test/proctoring.test.js",
     "test:submissions": "node test/submissions.test.js",
     "test:judge": "node test/judge.test.js",
-    "test:docker-judge": "node test/docker_judge.test.js"
+    "test:docker-judge": "node test/docker_judge.test.js",
+    "test:security": "node test/security_isolation.test.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^2.5.0",
@@ -45,6 +46,10 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.5.0",
     "nodemailer": "^10.3.1",
+    "puppeteer": "^25.16.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "puppeteer-real-browser": "^1.4.4",
     "tough-cookie": "^6.0.2",
     "xlsx": "^0.18.5",
     "zod": "^3.24.4"

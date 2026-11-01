@@ -67,6 +67,20 @@ export async function resolveUser(identifier) {
         { email: { startsWith: `${trimmed.toLowerCase()}@` } },
       ],
     },
+    select: {
+      id: true,
+      email: true,
+      universityId: true,
+      name: true,
+      role: true,
+      isVerified: true,
+      isSuperAdmin: true,
+      rating: true,
+      tier: true,
+      sessionMode: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 }
 

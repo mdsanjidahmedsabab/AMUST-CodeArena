@@ -53,7 +53,7 @@ router.get('/my-performance', authenticate, async (req, res, next) => {
 // GET /api/analytics/student/:userId
 // Diagnostics by student ID, university ID, or username
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/student/:userId', optionalAuthenticate, async (req, res, next) => {
+router.get('/student/:userId', authenticate, async (req, res, next) => {
   try {
     const parsed = studentIdParamSchema.safeParse(req.params);
     if (!parsed.success) {
@@ -67,6 +67,14 @@ router.get('/student/:userId', optionalAuthenticate, async (req, res, next) => {
     const user = await resolveUser(userId);
     if (!user) {
       return res.status(404).json({ error: `Student '${userId}' not found` });
+    }
+
+    const isOwner = req.user.id === user.id;
+    const isStaff = req.user.role === 'TEACHER' || req.user.role === 'ADMIN' || req.user.isSuperAdmin;
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({
+        error: 'Access denied: You cannot view diagnostics of another student',
+      });
     }
 
     const diagnostics = await getStudentDiagnostics(user.id);

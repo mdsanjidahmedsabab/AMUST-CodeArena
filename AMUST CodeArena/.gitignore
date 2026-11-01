@@ -43,3 +43,8 @@ server/tools/
 # Operating System Caches
 .DS_Store
 Thumbs.db
+
+# Headless browser profiles & snapshots
+.*profile/
+**/*profile/
+*.png

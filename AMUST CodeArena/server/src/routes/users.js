@@ -8,6 +8,7 @@
  */
 
 import { Router } from 'express';
+import { authenticate } from '../middleware/auth.js';
 import { z } from 'zod';
 import {
   resolveUser,
@@ -33,7 +34,7 @@ const submissionsQuerySchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/users/:username/analytics
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/:username/analytics', async (req, res, next) => {
+router.get('/:username/analytics', authenticate, async (req, res, next) => {
   try {
     const paramParsed = usernameParamSchema.safeParse(req.params);
     if (!paramParsed.success) {
@@ -52,6 +53,14 @@ router.get('/:username/analytics', async (req, res, next) => {
       });
     }
 
+    const isOwner = req.user.id === user.id;
+    const isStaff = req.user.role === 'TEACHER' || req.user.role === 'ADMIN' || req.user.isSuperAdmin;
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({
+        error: 'Access denied: You cannot view analytics of another user',
+      });
+    }
+
     const analytics = await getUserAnalytics(user);
     return res.json(analytics);
   } catch (err) {
@@ -62,7 +71,7 @@ router.get('/:username/analytics', async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/users/:username/submissions
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/:username/submissions', async (req, res, next) => {
+router.get('/:username/submissions', authenticate, async (req, res, next) => {
   try {
     const paramParsed = usernameParamSchema.safeParse(req.params);
     if (!paramParsed.success) {
@@ -86,6 +95,14 @@ router.get('/:username/submissions', async (req, res, next) => {
     if (!user) {
       return res.status(404).json({
         error: `User '${username}' not found`,
+      });
+    }
+
+    const isOwner = req.user.id === user.id;
+    const isStaff = req.user.role === 'TEACHER' || req.user.role === 'ADMIN' || req.user.isSuperAdmin;
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({
+        error: 'Access denied: You cannot view submissions of another user',
       });
     }
 

@@ -6,6 +6,7 @@
 
 import assert from 'node:assert/strict';
 import prisma from '../src/config/db.js';
+import { signAccessToken } from '../src/services/auth.service.js';
 import {
   resolveUser,
   getUserAnalytics,
@@ -116,18 +117,30 @@ async function runTests() {
   // Test 5: HTTP Endpoints (Live Server Check)
   console.log('\n5. Testing Live HTTP Endpoints:');
   const baseUrl = 'http://localhost:5000/api';
+  const token = signAccessToken({ id: user.id, role: user.role });
+  const authHeaders = { Authorization: `Bearer ${token}` };
 
-  const httpAnalytics = await fetch(`${baseUrl}/users/${encodeURIComponent(user.email.split('@')[0])}/analytics`);
+  // Verify unauthenticated request returns 401
+  const unauthRes = await fetch(`${baseUrl}/users/${encodeURIComponent(user.email.split('@')[0])}/analytics`);
+  assert.equal(unauthRes.status, 401, 'Unauthenticated request should return 401');
+
+  const httpAnalytics = await fetch(`${baseUrl}/users/${encodeURIComponent(user.email.split('@')[0])}/analytics`, {
+    headers: authHeaders,
+  });
   assert.equal(httpAnalytics.status, 200, 'GET /api/users/:username/analytics should return 200 OK');
   const analyticsJson = await httpAnalytics.json();
   assert.equal(analyticsJson.profile.email, user.email);
 
-  const httpSubmissions = await fetch(`${baseUrl}/users/${encodeURIComponent(user.email.split('@')[0])}/submissions?limit=3`);
+  const httpSubmissions = await fetch(`${baseUrl}/users/${encodeURIComponent(user.email.split('@')[0])}/submissions?limit=3`, {
+    headers: authHeaders,
+  });
   assert.equal(httpSubmissions.status, 200, 'GET /api/users/:username/submissions should return 200 OK');
   const submissionsJson = await httpSubmissions.json();
   assert.equal(submissionsJson.pagination.limit, 3);
 
-  const http404 = await fetch(`${baseUrl}/users/invalid_user_slug_9999/analytics`);
+  const http404 = await fetch(`${baseUrl}/users/invalid_user_slug_9999/analytics`, {
+    headers: authHeaders,
+  });
   assert.equal(http404.status, 404, 'Non-existent user should return 404 Not Found');
 
   console.log('   ✓ Live HTTP tests passed (200 OK and 404 handled properly)');

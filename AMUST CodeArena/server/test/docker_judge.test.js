@@ -338,7 +338,9 @@ int main() {
   const targetSubId = httpSubmitData.submissionId;
   let finalStatus = null;
   for (let attempt = 0; attempt < 20; attempt++) {
-    const statusRes = await fetch(`${baseUrl}/${targetSubId}/status`);
+    const statusRes = await fetch(`${baseUrl}/${targetSubId}/status`, {
+      headers: { Authorization: `Bearer ${studentToken}` },
+    });
     assert.equal(statusRes.status, 200);
     const statusData = await statusRes.json();
     if (statusData.state === 'Done') {

@@ -35,8 +35,8 @@ router.post('/', authenticate, handleSubmitSolution);
 router.get('/queue/metrics', optionalAuthenticate, getSubmissionMetrics);
 
 // Real-time status polling & SSE streaming
-router.get('/:id/status', optionalAuthenticate, getSubmissionStatus);
-router.get('/:id/stream', optionalAuthenticate, streamSubmissionStatus);
+router.get('/:id/status', authenticate, getSubmissionStatus);
+router.get('/:id/stream', authenticate, streamSubmissionStatus);
 
 // Contest submissions history for authenticated user
 router.get('/contest/:slug', authenticate, getContestSubmissions);

@@ -215,6 +215,7 @@ export async function getSubmissionStatus(req, res, next) {
       where: { id },
       select: {
         id: true,
+        userId: true,
         verdict: true,
         timeMs: true,
         memoryKb: true,
@@ -225,6 +226,12 @@ export async function getSubmissionStatus(req, res, next) {
 
     if (!submission) {
       return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    const isOwner = req.user?.id === submission.userId;
+    const isStaff = req.user?.role === 'TEACHER' || req.user?.role === 'ADMIN' || req.user?.isSuperAdmin;
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ error: 'Access denied: You cannot view this submission' });
     }
 
     const verdictShort = VERDICT_TO_SHORT[submission.verdict] || submission.verdict;
@@ -256,6 +263,24 @@ export async function getSubmissionStatus(req, res, next) {
 
 export async function streamSubmissionStatus(req, res) {
   const { id } = req.params;
+
+  const submission = await prisma.submission.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+    },
+  });
+
+  if (!submission) {
+    return res.status(404).json({ error: 'Submission not found' });
+  }
+
+  const isOwner = req.user?.id === submission.userId;
+  const isStaff = req.user?.role === 'TEACHER' || req.user?.role === 'ADMIN' || req.user?.isSuperAdmin;
+  if (!isOwner && !isStaff) {
+    return res.status(403).json({ error: 'Access denied: You cannot stream this submission' });
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

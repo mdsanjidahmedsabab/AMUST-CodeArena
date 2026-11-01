@@ -421,7 +421,7 @@ export async function executeProctorAction({
         disqualifyReason: reason || 'Force-disqualified by invigilator for integrity violations.',
         integrityScore: 0,
       },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, universityId: true, email: true } } },
     });
 
     actionDetails = {
@@ -436,7 +436,7 @@ export async function executeProctorAction({
         warningsCount: participant.warningsCount + 1,
         integrityScore: Math.max(0, participant.integrityScore - 20),
       },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, universityId: true, email: true } } },
     });
 
     actionDetails = {
@@ -454,7 +454,7 @@ export async function executeProctorAction({
         warningsCount: 0,
         integrityScore: 100,
       },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, universityId: true, email: true } } },
     });
 
     actionDetails = {

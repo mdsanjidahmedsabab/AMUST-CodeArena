@@ -30,6 +30,11 @@ export function clearAccessToken() {
   _accessToken = null;
 }
 
+/** Returns the current in-memory access token. */
+export function getAccessToken() {
+  return _accessToken;
+}
+
 // ── Request interceptor: attach Bearer token ──────────────────────────────
 api.interceptors.request.use((config) => {
   if (_accessToken) {

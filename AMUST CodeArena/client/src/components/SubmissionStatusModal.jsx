@@ -26,7 +26,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import api from '../api/client.js';
+import api, { getAccessToken } from '../api/client.js';
 import { soundFx } from '../utils/audioEffects.js';
 
 export default function SubmissionStatusModal({
@@ -160,7 +160,9 @@ export default function SubmissionStatusModal({
     };
 
     // Establish Server-Sent Events (SSE) live feed
-    const eventSource = new EventSource(`/api/submissions/${submissionId}/stream`);
+    const token = getAccessToken();
+    const streamUrl = `/api/submissions/${submissionId}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const eventSource = new EventSource(streamUrl);
 
     eventSource.addEventListener('status', (e) => {
       try {
