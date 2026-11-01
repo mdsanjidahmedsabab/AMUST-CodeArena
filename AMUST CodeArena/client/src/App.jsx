@@ -27,6 +27,7 @@ import ContestsHubPage         from './pages/ContestsHubPage';
 import ContestDetailPage       from './pages/ContestDetailPage';
 import ContestArenaPage        from './pages/ContestArenaPage';
 import ContestLeaderboardPage  from './pages/ContestLeaderboardPage';
+import SettingsPage            from './pages/SettingsPage';
 
 // ── React Query client (shared, one instance) ─────────────────────────────
 const queryClient = new QueryClient({
@@ -122,6 +123,11 @@ export default function App() {
               <Route path="/contests"                   element={<ContestsHubPage />} />
               <Route path="/contests/:slug"             element={<ContestDetailPage />} />
               <Route path="/contests/:slug/leaderboard"  element={<ContestLeaderboardPage />} />
+
+              {/* Account Settings & Profile Management */}
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/profile" element={<SettingsPage />} />
+              <Route path="/settings/remote-accounts" element={<SettingsPage />} />
 
               {/* Teacher Portal Protected Routes */}
               <Route element={<ProtectedRoute allowedRoles={['TEACHER']} />}>

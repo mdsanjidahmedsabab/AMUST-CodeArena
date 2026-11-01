@@ -20,6 +20,7 @@ import {
   Check,
   ShieldAlert,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 import ArenaLogo from './ArenaLogo';
 import { useAuth } from '../contexts/AuthContext';
@@ -144,6 +145,12 @@ export default function Navbar() {
                   </Link>
                 </>
               )}
+
+              {/* Settings & OJ Accounts link */}
+              <NavLink to="/settings" className={linkCls} title="Account & Online Judge Settings">
+                <Settings className="w-4 h-4 text-slate-400" />
+                <span>Settings</span>
+              </NavLink>
             </div>
           )}
 
@@ -152,10 +159,14 @@ export default function Navbar() {
             {user ? (
               <>
                 <div className="flex items-center gap-2">
-                  <span className="hidden sm:flex items-center gap-1.5 text-sm text-slate-300 font-medium">
+                  <Link
+                    to="/settings"
+                    className="hidden sm:flex items-center gap-1.5 text-sm text-slate-300 font-medium hover:text-white transition-colors"
+                    title="Account & OJ Settings"
+                  >
                     <User className="w-4 h-4 text-slate-400" />
                     <span>{user.name}</span>
-                  </span>
+                  </Link>
 
                   {/* Super Admin: Interactive Role Switcher */}
                   {isSuperAdmin ? (
@@ -228,6 +239,16 @@ export default function Navbar() {
                               <Check className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
                             )}
                           </button>
+
+                          {/* Quick Link to Settings */}
+                          <Link
+                            to="/settings"
+                            onClick={() => setIsRoleMenuOpen(false)}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors mt-1"
+                          >
+                            <Settings className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>OJ Accounts & Settings</span>
+                          </Link>
 
                           <div className="mt-2 pt-2 border-t border-slate-800/80 px-2.5 text-[10px] text-slate-500">
                             Super Admin dual access enabled for {user.email}.

@@ -99,6 +99,7 @@ export async function handleSubmitSolution(req, res, next) {
         id: true,
         title: true,
         source: true,
+        sourceId: true,
         sampleTestcases: true,
       },
     });

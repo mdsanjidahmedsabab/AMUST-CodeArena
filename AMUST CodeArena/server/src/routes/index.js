@@ -6,6 +6,7 @@ import contestRoutes from './contests.js';
 import submissionRoutes from './submissions.js';
 import aiRoutes from './ai.js';
 import analyticsRoutes from './analytics.js';
+import remoteAccountRoutes from './remoteAccountRoutes.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/contests', contestRoutes);
 router.use('/submissions', submissionRoutes);
 router.use('/ai', aiRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/remote-accounts', remoteAccountRoutes);
 
 export default router;

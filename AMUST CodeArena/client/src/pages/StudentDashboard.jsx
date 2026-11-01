@@ -34,9 +34,11 @@ import {
   GraduationCap,
   Sparkles,
   RefreshCw,
+  Link2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
+import RemoteAccountsSettings from '../components/settings/RemoteAccountsSettings';
 
 // ── Tier Color Configuration (per REQ-16 & elo-analytics skill) ───────────────
 const TIER_STYLES = {
@@ -711,6 +713,14 @@ export default function StudentDashboard() {
 
             {/* Quick CTAs */}
             <div className="flex items-center gap-3">
+              <a
+                href="#oj-accounts"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white font-semibold text-xs transition-colors shadow-sm"
+                title="Manage external Online Judge credentials"
+              >
+                <Link2 className="w-4 h-4 text-emerald-400" />
+                <span>OJ Accounts</span>
+              </a>
               <Link
                 to="/problems"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs tracking-wide shadow-lg shadow-emerald-500/20 transition-all hover:scale-[1.02]"
@@ -1048,7 +1058,12 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* ── 5. Recent Submissions Log Table ──────────────────────────────── */}
+        {/* ── 5. Online Judge Accounts Connection ──────────────────────────── */}
+        <div id="oj-accounts" className="bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-2xl p-6 shadow-xl scroll-mt-20">
+          <RemoteAccountsSettings />
+        </div>
+
+        {/* ── 6. Recent Submissions Log Table ──────────────────────────────── */}
         <SubmissionsTable username={username} />
 
       </div>

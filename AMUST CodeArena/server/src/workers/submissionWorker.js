@@ -24,6 +24,7 @@ import {
   executeCustomRunWithFallback,
 } from '../services/dockerJudgeService.js';
 import { truncateOutput, VERDICTS } from '../services/judgeService.js';
+import { dispatchSubmission } from '../services/remoteJudge/remoteDispatcher.js';
 
 // ── Global Event Emitter for Real-Time State Broadcasting ─────────────────────
 export const submissionEvents = new EventEmitter();
@@ -152,6 +153,10 @@ export async function processSubmissionJob(submissionId) {
           select: {
             id: true,
             title: true,
+            source: true,
+            sourceId: true,
+            timeLimit: true,
+            memoryLimit: true,
             sampleTestcases: true,
           },
         },
@@ -181,17 +186,20 @@ export async function processSubmissionJob(submissionId) {
       totalTestcases: testcases.length,
     });
 
-    // 4. Run Isolated Judge Evaluation (Docker with host sandbox fallback)
-    const judgeResult = await judgeSubmissionWithFallback({
-      language: submission.language,
+    // 4. Dispatch Evaluation via Multi-Judge Router (Codeforces Remote Proxy or Local Docker Sandbox)
+    const judgeResult = await dispatchSubmission({
+      userId: submission.userId,
+      problem: submission.problem,
       sourceCode: submission.sourceCode,
-      testcases,
-      timeoutMs: 2500,
-      onProgress: ({ state, currentTestcase, totalTestcases }) => {
+      language: submission.language,
+      submissionId: submission.id,
+      onProgress: ({ state, currentTestcase, totalTestcases, timeMs, memoryKb }) => {
         broadcastState(submission.id, {
           state,
           currentTestcase,
           totalTestcases,
+          timeMs: timeMs || 0,
+          memoryKb: memoryKb || 0,
         });
       },
     });

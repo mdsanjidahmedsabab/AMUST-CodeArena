@@ -115,6 +115,7 @@ model User {
   ratingHistory       UserRatingHistory[]
   contestParticipants ContestParticipant[]
   proctorLogs         ProctorLog[]
+  remoteAccounts      RemoteAccount[]
 
   @@map("users")
 }
@@ -301,4 +302,20 @@ model PasswordReset {
 
   @@index([expiresAt])
   @@map("password_resets")
+}
+
+model RemoteAccount {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  ojName    String   @map("oj_name")
+  handle    String
+  password  String
+  isValid   Boolean  @default(true) @map("is_valid")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ojName])
+  @@map("remote_accounts")
 }
