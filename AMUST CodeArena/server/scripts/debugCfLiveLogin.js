@@ -1,13 +1,14 @@
 /**
  * scripts/debugCfLiveLogin.js
  * ────────────────────────────
- * Dedicated CLI Debug Script for Codeforces Authentication & Session Management.
+ * Dedicated CLI Debug Script for Codeforces Authentication & Submission Pipeline.
  *
- * Verifies live:
- *   1. Cookie status: initial cookies harvested into tough-cookie jar.
- *   2. CSRF token, ftaa, and bfaa extraction.
- *   3. Login POST status using DEFAULT_CF_BOT_HANDLE and DEFAULT_CF_BOT_PASSWORD.
- *   4. Codeforces API access and submission inspection.
+ * Demonstrates live:
+ *   1. Cookie fetch: Initial GET to https://codeforces.com/enter with tough-cookie jar.
+ *   2. CSRF extraction: Dynamic parsing of csrf_token, ftaa, and bfaa.
+ *   3. Login authentication: POST to https://codeforces.com/enter with credentials.
+ *   4. Problem submission attempt: Solution submission POST to contest/problemset endpoint.
+ *   5. Real-time polling: Verification via official Codeforces public API.
  */
 
 import 'dotenv/config';
@@ -48,6 +49,16 @@ function generateBfaa() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+const WATERMELON_SOLUTION = `#include <iostream>
+int main() {
+    int w;
+    if (std::cin >> w) {
+        std::cout << ((w > 2 && w % 2 == 0) ? "YES\\n" : "NO\\n");
+    }
+    return 0;
+}
+`;
+
 async function debugLogin() {
   console.log('\n======================================================');
   console.log('   Codeforces Live Login & Session Debugger');
@@ -60,7 +71,7 @@ async function debugLogin() {
   console.log(`   DEFAULT_CF_BOT_HANDLE   : ${botHandle ? `"${botHandle}"` : '(not configured in .env)'}`);
   console.log(`   DEFAULT_CF_BOT_PASSWORD : ${botPassword ? '******** (configured)' : '(not configured in .env)'}\n`);
 
-  // Initialize Cookie Jar
+  // Initialize persistent Cookie Jar
   const jar = new CookieJar();
   const client = wrapper(
     axios.create({
@@ -68,14 +79,14 @@ async function debugLogin() {
       withCredentials: true,
       timeout: 20000,
       headers: DEFAULT_BROWSER_HEADERS,
-      validateStatus: (status) => status < 500, // inspect all responses below 500
+      validateStatus: (status) => status < 500, // allow 302 and 4xx inspection
     })
   );
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 1: GET https://codeforces.com/enter
+  // STEP 1: Cookie Fetch (GET https://codeforces.com/enter)
   // ─────────────────────────────────────────────────────────────
-  console.log('🌐 [STEP 1: GET https://codeforces.com/enter]');
+  console.log('🌐 [STEP 1: Cookie Fetch (GET https://codeforces.com/enter)]');
   let enterRes;
   let pageHtml = '';
   try {
@@ -107,7 +118,7 @@ async function debugLogin() {
   });
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 2: CSRF Token & Fingerprint Extraction
+  // STEP 2: CSRF & Token Extraction
   // ─────────────────────────────────────────────────────────────
   console.log('\n🔑 [STEP 2: CSRF & Fingerprint Token Extraction]');
   const $ = cheerio.load(pageHtml);
@@ -131,9 +142,11 @@ async function debugLogin() {
   console.log(`   bfaa Token         : "${bfaa}" (${pageBfaa ? 'extracted from page' : 'generated'})`);
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 3: POST https://codeforces.com/enter (Login Verification)
+  // STEP 3: Login Authentication (POST https://codeforces.com/enter)
   // ─────────────────────────────────────────────────────────────
-  console.log('\n🔐 [STEP 3: POST https://codeforces.com/enter]');
+  console.log('\n🔐 [STEP 3: Login Authentication (POST https://codeforces.com/enter)]');
+  let isAuthenticated = false;
+
   if (!csrfToken) {
     console.error('   ❌ Login POST Blocked: Cannot execute POST without valid csrf_token from /enter (Cloudflare HTTP 403 challenge active).');
   } else if (!botHandle || !botPassword) {
@@ -182,6 +195,7 @@ async function debugLogin() {
         console.error(`   ❌ LOGIN FAILED: "You have submitted incorrect password too many times."`);
       } else if (userProfileLink || (!hasPasswordInput && (loginRes.status === 302 || !finalUrl.includes('/enter')))) {
         console.log(`   ✅ LOGIN SUCCESSFUL: Authenticated as "${botHandle}"!`);
+        isAuthenticated = true;
       } else {
         console.warn(`   ⚠️ LOGIN UNCERTAIN: Still on page with password input or redirected unexpectedly.`);
       }
@@ -201,9 +215,87 @@ async function debugLogin() {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 4: Public API Status Verification & Submission Polling
+  // STEP 4: Problem Submission Attempt
   // ─────────────────────────────────────────────────────────────
-  console.log('\n📊 [STEP 4: Public Codeforces API Status & Verdict Poller]');
+  console.log('\n📤 [STEP 4: Problem Submission Attempt (Contest 4 / Problem 4A)]');
+  const targetContestId = 4;
+  const targetProblemIndex = 'A';
+  const targetProgramTypeId = '54'; // GNU G++17 / G++20
+
+  console.log(`   Target Problem : Codeforces 4A (Watermelon)`);
+  console.log(`   Target Language: GNU C++ (programTypeId: ${targetProgramTypeId})`);
+  console.log(`   Source Length  : ${WATERMELON_SOLUTION.length} bytes`);
+
+  // Attempt to probe contest submit page
+  try {
+    const submitProbeRes = await client.get(`https://codeforces.com/contest/${targetContestId}/submit`);
+    console.log(`   Probe Contest Submit: HTTP ${submitProbeRes.status} ${submitProbeRes.statusText || ''}`);
+
+    const probeHtml = String(submitProbeRes.data || '');
+    const $submit = cheerio.load(probeHtml);
+    const submitCsrf =
+      $submit('meta[name="X-Csrf-Token"]').attr('content') ||
+      $submit('input[name="csrf_token"]').val() ||
+      csrfToken;
+
+    if (submitProbeRes.status === 403 || probeHtml.includes('Just a moment...')) {
+      console.warn('   ⚠️ Submit Page Blocked: Cloudflare challenge active on /contest/4/submit.');
+      console.log('   Submission Payload Structure Prepared:');
+      console.log(`      • csrf_token           : "${submitCsrf || '(blocked)'}"`);
+      console.log(`      • action               : "submitSolutionFormSubmitted"`);
+      console.log(`      • submittedProblemIndex: "${targetProblemIndex}"`);
+      console.log(`      • submittedProblemCode : "${targetContestId}${targetProblemIndex}"`);
+      console.log(`      • programTypeId        : "${targetProgramTypeId}"`);
+      console.log(`      • ftaa                 : "${ftaa}"`);
+      console.log(`      • bfaa                 : "${bfaa}"`);
+      console.log(`      • source               : ${WATERMELON_SOLUTION.slice(0, 30)}...`);
+      console.log('   ℹ️ Real live POST withheld because authenticated session is not confirmed.');
+    } else if (isAuthenticated && submitCsrf) {
+      console.log(`   Live submit CSRF token: "${submitCsrf}"`);
+      console.log(`   Submitting solution for Problem 4A...`);
+
+      const submitForm = new URLSearchParams();
+      submitForm.append('csrf_token', submitCsrf);
+      submitForm.append('action', 'submitSolutionFormSubmitted');
+      submitForm.append('ftaa', ftaa);
+      submitForm.append('bfaa', bfaa);
+      submitForm.append('submittedProblemIndex', targetProblemIndex);
+      submitForm.append('submittedProblemCode', `${targetContestId}${targetProblemIndex}`);
+      submitForm.append('programTypeId', targetProgramTypeId);
+      submitForm.append('source', WATERMELON_SOLUTION);
+      submitForm.append('tabSize', '4');
+      submitForm.append('_tta', '176');
+
+      const submitRes = await client.post(
+        `https://codeforces.com/contest/${targetContestId}/submit?csrf_token=${submitCsrf}`,
+        submitForm.toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Referer: `https://codeforces.com/contest/${targetContestId}/submit`,
+            Origin: 'https://codeforces.com',
+          },
+          maxRedirects: 5,
+        }
+      );
+      console.log(`   Submit Response: HTTP ${submitRes.status}`);
+      const submitLoc = submitRes.headers?.location || submitRes.request?.res?.responseUrl || '';
+      console.log(`   Submit Redirect Location: "${submitLoc}"`);
+    } else {
+      console.log('   Submission Payload Structure Prepared:');
+      console.log(`      • Endpoint             : POST https://codeforces.com/contest/${targetContestId}/submit`);
+      console.log(`      • submittedProblemCode : "${targetContestId}${targetProblemIndex}"`);
+      console.log(`      • programTypeId        : "${targetProgramTypeId}" (C++17/20)`);
+      console.log('   ℹ️ Live POST requires active authenticated session (configure DEFAULT_CF_BOT_HANDLE in .env).');
+    }
+  } catch (probeErr) {
+    console.error(`   ❌ Submit Probe Error:`, probeErr.message);
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // STEP 5: Public API Status Verification & Submission Polling
+  // ─────────────────────────────────────────────────────────────
+  console.log('\n📊 [STEP 5: Public Codeforces API Status & Verdict Poller]');
   const handleToCheck = botHandle || 'tourist';
   try {
     const apiRes = await axios.get(
